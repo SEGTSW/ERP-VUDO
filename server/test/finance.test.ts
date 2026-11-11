@@ -101,3 +101,21 @@ describe('витрати замовлення і чистий прибуток (
     expect((await m.get(`/api/finance/orders/${o.id}/costs`)).status).toBe(403);
   });
 });
+
+describe('P&L (10.2)', () => {
+  it('факт за рядками статейника; план; залишок на кінець місяця', async () => {
+    const { a, o } = await setup();
+    await a.post('/api/finance/cash', expense(o.id, 4000));
+    await a.post('/api/finance/cash', { date: today, type: 'Дохід', cat: 'Інші', obj: 'Обмін коштів', orderId: null, counterparty: '', note: '', account: 'Готівка', amount: 1000 });
+    const m = today.slice(0, 7);
+    expect((await a.agent.put('/api/finance/pnl/plan').set('X-VUDO', '1').send({ month: m, line: 'income', amount: 500000 })).status).toBe(200);
+    const p = (await a.get(`/api/finance/pnl?year=${today.slice(0, 4)}`)).body;
+    // дохід — оплата 6 000; витрати на замовлення −4 000; обмін коштів — «не в P&L», але в грошовому потоці
+    expect(p.fact[m]).toMatchObject({ income: 6000, orderCost: -4000, none: 1000, net: 3000 });
+    expect(p.plan[m]).toEqual({ income: 500000 });
+    expect(p.opening).toBe(0);
+    expect(norm((await logTexts()).at(-1)!)).toBe(`P&L план ${m} · Дохід: — → 500 000 грн`);
+    const mgr = await loginAs('iryna');
+    expect((await mgr.get('/api/finance/pnl')).status).toBe(403);
+  });
+});

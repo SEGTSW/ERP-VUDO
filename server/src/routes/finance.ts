@@ -314,3 +314,68 @@ financeRouter.patch('/finance/orders/:id/opex', async (req, res) => {
   });
   res.json({ ok: true });
 });
+
+/* ---------- 10.2 P&L ---------- */
+
+financeRouter.get('/finance/pnl', async (req, res) => {
+  const today = kyivToday();
+  const year = z.coerce.number().int().min(2000).max(2100).default(Number(today.slice(0, 4))).parse(req.query.year);
+  const months = Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, '0')}`);
+  // (17) Факт рядка за місяць = Σ операцій місяця з цим рядком (оплати клієнтів включно)
+  const rows = await cashRows(pool, { from: `${year}-01-01`, to: `${year}-12-31` });
+  const fact: Record<string, Record<string, number>> = Object.fromEntries(months.map((m) => [m, { net: 0 }]));
+  for (const r of rows) {
+    const f = fact[r.date.slice(0, 7)]!;
+    f[r.line] = Math.round(((f[r.line] ?? 0) + r.sum) * 100) / 100;
+    f.net = Math.round((f.net! + r.sum) * 100) / 100;
+  }
+  // (20) Залишок = Σ усіх операцій до кінця місяця: стартовий — усе до 1 січня
+  const before = (await cashRows(pool, { to: `${year - 1}-12-31` })).reduce((s, r) => s + r.sum, 0);
+  const plan = await pool.query<{ month: string; line: string; amount: number }>(
+    'SELECT month, line, amount FROM pnl_plan WHERE month LIKE $1',
+    [`${year}-%`],
+  );
+  const planBy: Record<string, Record<string, number>> = Object.fromEntries(months.map((m) => [m, {}]));
+  for (const p of plan.rows) planBy[p.month]![p.line] = p.amount;
+  const years = await pool.query<{ y: number }>(
+    `SELECT DISTINCT y FROM (
+       SELECT extract(year FROM date)::int AS y FROM cash_ops UNION SELECT extract(year FROM date)::int FROM payments
+       UNION SELECT left(month, 4)::int FROM pnl_plan) x ORDER BY y`,
+  );
+  res.json({
+    year,
+    months,
+    fact,
+    plan: planBy,
+    opening: Math.round(before * 100) / 100,
+    years: [...new Set([...years.rows.map((x) => x.y), Number(today.slice(0, 4))])].sort(),
+    today,
+  });
+});
+
+financeRouter.put('/finance/pnl/plan', async (req, res) => {
+  const b = z
+    .object({
+      month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
+      line: z.enum(PNL_LINES.map((l) => l[0]).filter((l) => l !== 'none') as [string, ...string[]]),
+      amount: z.number().min(-1_000_000_000).max(1_000_000_000).nullable(),
+    })
+    .parse(req.body);
+  const u = me(req);
+  await tx(async (c) => {
+    const r = await c.query<{ amount: number }>('SELECT amount FROM pnl_plan WHERE month = $1 AND line = $2 FOR UPDATE', [b.month, b.line]);
+    const old = r.rows[0]?.amount ?? null;
+    if (old === b.amount) return;
+    if (b.amount == null) await c.query('DELETE FROM pnl_plan WHERE month = $1 AND line = $2', [b.month, b.line]);
+    else {
+      await c.query(
+        `INSERT INTO pnl_plan (month, line, amount, updated_by) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (month, line) DO UPDATE SET amount = EXCLUDED.amount, updated_at = now(), updated_by = EXCLUDED.updated_by`,
+        [b.month, b.line, b.amount, u.id],
+      );
+    }
+    const v = (x: number | null) => (x == null ? '—' : money(x));
+    await writeLog(c, { userId: u.id, folder: 'fin', finScope: 'report', text: `P&L план ${b.month} · ${lineLabel(b.line)}: ${v(old)} → ${v(b.amount)}` });
+  });
+  res.json({ ok: true });
+});

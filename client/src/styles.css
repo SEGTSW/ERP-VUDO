@@ -452,3 +452,4 @@ td.num:first-child{white-space:nowrap}
 /* Плитки сум: останній ряд розтягується на всю ширину, без сірих порожніх клітинок */
 .sums{display:flex;flex-wrap:wrap}
 .sums>div{flex:1 1 118px}
+table.pnl thead th:first-child{left:0;z-index:3}

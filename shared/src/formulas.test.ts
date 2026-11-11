@@ -151,3 +151,16 @@ describe('порядок статусів (погоджено із замовн�
     expect(stagePassed('Договір / аванс отримано', 'Збірка')).toBe(false);
   });
 });
+
+describe('P&L — формули 18–19', () => {
+  it('виручка, маржа, результат, операційна маржа', async () => {
+    const { pnlDerived, planSigned } = await import('./pnl.js');
+    const d = pnlDerived({ income: 621284, orderCost: -321850, admin: -40413, payroll: -90386, marketing: -10000, credit: 5000 });
+    expect(d.revenue).toBe(299434);
+    expect(Math.round(d.margin! * 10) / 10).toBe(48.2);
+    expect(d.result).toBe(299434 - 40413 - 90386 - 10000 + 5000);
+    expect(planSigned('admin', 40413)).toBe(-40413);
+    expect(planSigned('credit', -5000)).toBe(-5000);
+    expect(planSigned('income', 100)).toBe(100);
+  });
+});
