@@ -95,23 +95,26 @@ export async function applyPeople(db: Db, o: OrderPeople): Promise<number> {
 
 /** Перехід замовлення в статус ставить етапу 100 % (якщо днів не було — 1 день від сьогодні). */
 export async function completeStage(db: Db, orderId: number, stage: PlanStage, today = kyivToday()): Promise<void> {
+  // Замір з призначеною датою лишається на своїй даті — це факт, а не «сьогодні».
   await db.query(
-    `UPDATE plan_tasks SET progress = 100,
-            start_date = CASE WHEN days IS NULL THEN $3::date ELSE start_date END,
-            days = COALESCE(days, 1)
-      WHERE order_id = $1 AND stage = $2 AND progress < 100`,
+    `UPDATE plan_tasks t SET progress = 100,
+            start_date = CASE WHEN t.stage = 'Замір' AND o.measure_date IS NOT NULL THEN o.measure_date
+                              WHEN t.days IS NULL THEN $3::date ELSE t.start_date END,
+            days = CASE WHEN t.stage = 'Замір' AND o.measure_date IS NOT NULL THEN 1 ELSE COALESCE(t.days, 1) END
+       FROM orders o
+      WHERE o.id = t.order_id AND t.order_id = $1 AND t.stage = $2 AND t.progress < 100`,
     [orderId, stage, today],
   );
 }
 
 /**
  * Дату заміру ставить менеджер або власник — і вона одразу стає фактом у плані:
- * незавершені етапи «Замір» стають на цю дату (1 день). Без дати — етап знову без днів.
+ * усі етапи «Замір» (і виконані теж) стають на цю дату (1 день). Без дати — незавершений етап знову без днів.
  */
 export async function syncMeasureTasks(db: Db, orderId: number, measureDate: string | null): Promise<void> {
   await db.query(
     `UPDATE plan_tasks SET start_date = $2::date, days = CASE WHEN $2::date IS NULL THEN NULL ELSE 1 END
-      WHERE order_id = $1 AND stage = 'Замір' AND progress < 100`,
+      WHERE order_id = $1 AND stage = 'Замір' AND ($2::date IS NOT NULL OR progress < 100)`,
     [orderId, measureDate],
   );
 }

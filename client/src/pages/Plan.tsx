@@ -48,7 +48,8 @@ export function Plan() {
       (!who || String(t.assigneeId) === who) &&
       (!orderFilter || String(t.orderId) === orderFilter) &&
       (!stage || t.stage === stage) &&
-      (showDone || !t.sched.done),
+      // Виконані ховаються; замір на сьогодні чи пізніше видно завжди — це факт для всіх
+      (showDone || !t.sched.done || (t.stage === 'Замір' && t.sched.start >= today)),
   );
   const planned = filtered.filter((t) => t.sched.planned);
   const unplanned = filtered.filter((t) => !t.sched.planned && t.progress < 100);
