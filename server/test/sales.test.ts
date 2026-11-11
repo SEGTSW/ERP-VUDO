@@ -142,7 +142,12 @@ function mainOf(card: Record<string, unknown> & { client: { id: number } }) {
 describe('статуси (розділ 4)', () => {
   async function toPricing(m: S, managerId: number, measurerId: number) {
     const o = await newOrder(m, managerId);
+    // Новий порядок: Звернення → Прорахунок → Замір призначено → Замір виконано → Очікує рішення → Проєктування → Проєкт погоджено → Договір
     let r = await m.post(`/api/orders/${o.id}/status`, { to: 'Замір призначено', mode: 'step', values: {} });
+    expect(r.body.error).toMatch(/можна перейти лише в: «Прорахунок»/);
+    r = await m.post(`/api/orders/${o.id}/status`, { to: 'Прорахунок', mode: 'step' });
+    expect(r.body.status).toBe('Прорахунок');
+    r = await m.post(`/api/orders/${o.id}/status`, { to: 'Замір призначено', mode: 'step', values: {} });
     expect(r.body.error).toBe("Заповніть поле «Адреса об'єкта».");
     r = await m.post(`/api/orders/${o.id}/status`, {
       to: 'Замір призначено', mode: 'step', values: { address: 'Київ, Хрещатик 1', measureDate: '2026-11-12', measurerId },
@@ -161,8 +166,10 @@ describe('статуси (розділ 4)', () => {
   it('крок вперед з умовами; договір вимагає аванс ≥ 30 % і фіксує дату та ціну', async () => {
     const { ids, m } = await team();
     const o = await toPricing(m, ids.iryna, ids.taras);
-    await m.post(`/api/orders/${o.id}/status`, { to: 'Прорахунок', mode: 'step' });
     await m.post(`/api/orders/${o.id}/status`, { to: 'Очікує рішення клієнта', mode: 'step' });
+    await m.post(`/api/orders/${o.id}/status`, { to: 'Проєктування', mode: 'step' });
+    const pp = await m.post(`/api/orders/${o.id}/status`, { to: 'Проєкт погоджено', mode: 'step', values: { ok: true } });
+    expect(pp.body).toMatchObject({ status: 'Проєкт погоджено', contractDate: null });
     let r = await m.post(`/api/orders/${o.id}/status`, { to: 'Договір / аванс отримано', mode: 'step' });
     expect(r.body.error).toMatch(/Потрібен аванс щонайменше 30% — 4.500 грн/);
     await m.post(`/api/orders/${o.id}/payments`, { sum: 4500, type: 'аванс', method: 'картка', date: kyivToday() });
@@ -181,24 +188,24 @@ describe('статуси (розділ 4)', () => {
   it('кнопкою — лише наступний крок; перемикачем — пропуск з перевіркою умов усіх пропущених', async () => {
     const { ids, m } = await team();
     const o = await toPricing(m, ids.iryna, ids.taras);
-    let r = await m.post(`/api/orders/${o.id}/status`, { to: 'Очікує рішення клієнта', mode: 'step' });
+    let r = await m.post(`/api/orders/${o.id}/status`, { to: 'Проєктування', mode: 'step' });
     expect(r.body.error).toMatch(/можна перейти лише в/);
     r = await m.post(`/api/orders/${o.id}/status`, { to: 'Договір / аванс отримано', mode: 'jump' });
     expect(r.body.error).toMatch(/^Щоб перейти в «Договір \/ аванс отримано»: Потрібен аванс/);
     await m.post(`/api/orders/${o.id}/payments`, { sum: 15000, type: 'аванс', method: 'готівка', date: kyivToday() });
-    r = await m.post(`/api/orders/${o.id}/status`, { to: 'Проєкт погоджено', mode: 'jump', values: { ok: true } });
-    expect(r.body.status).toBe('Проєкт погоджено');
+    r = await m.post(`/api/orders/${o.id}/status`, { to: 'Закупівля матеріалів', mode: 'jump' });
+    expect(r.body.status).toBe('Закупівля матеріалів');
     expect(r.body.contractDate).toBe(kyivToday());
     const done = r.body.tasks.filter((t: { progress: number }) => t.progress === 100).map((t: { stage: string }) => t.stage);
     expect(done).toEqual(['Прорахунок', 'Замір', 'Конструктив']);
     expect((await logTexts()).find((t) => t.startsWith('Статус «Замір виконано»'))).toBe(
-      'Статус «Замір виконано» → «Проєкт погоджено» (пропущено етапів: 4)',
+      'Статус «Замір виконано» → «Закупівля матеріалів» (пропущено етапів: 4)',
     );
     // назад — без умов, дата договору лишається
     r = await m.post(`/api/orders/${o.id}/status`, { to: 'Прорахунок', mode: 'jump' });
     expect(r.body.status).toBe('Прорахунок');
     expect(r.body.contractDate).toBe(kyivToday());
-    expect((await logTexts()).at(-1)).toBe('Статус «Проєкт погоджено» → «Прорахунок» (повернуто назад)');
+    expect((await logTexts()).at(-1)).toBe('Статус «Закупівля матеріалів» → «Прорахунок» (повернуто назад)');
   });
 
   it('закрити можна лише без боргу; відмова з причиною', async () => {
@@ -213,7 +220,7 @@ describe('статуси (розділ 4)', () => {
     expect(r.body.error).toMatch(/борг клієнта 10.000 грн/);
     const logs = (await logTexts()).map((t) => t.replace(/\s/g, ' '));
     expect(logs).toContain('Сповіщення менеджеру: змонтовано, борг 10 000 грн');
-    expect(logs).toContain('Статус «Замір виконано» → «Змонтовано» (пропущено етапів: 9)');
+    expect(logs).toContain('Статус «Замір виконано» → «Змонтовано» (пропущено етапів: 8)');
     const folder = await pool.query(`SELECT folder FROM audit_log WHERE text LIKE 'Статус «Замір виконано» → «Змонтовано»%'`);
     expect(folder.rows[0].folder).toBe('mont');
 

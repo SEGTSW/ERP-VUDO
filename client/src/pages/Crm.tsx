@@ -1,6 +1,6 @@
 import { useDeferredValue, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { CLAIM, REFUSAL, STATUSES, money, moveFields, statusGroup, type Status } from '@vudo/shared';
+import { CLAIM, CONTRACT_INDEX, REFUSAL, STATUSES, money, moveFields, statusGroup, type Status } from '@vudo/shared';
 import { api, errorText } from '../api';
 import type { OfficeCard, OrderListItem } from '../types';
 import { useDrawer } from '../orders/hooks';
@@ -10,8 +10,9 @@ import { kmoney } from '../ui/bits';
 import { useToast } from '../ui/toast';
 import { ordersQuery, useManagers } from './Orders';
 
-const SALES: Status[] = STATUSES.slice(0, 5) as Status[];
-const PROD: Status[] = [...(STATUSES.slice(5) as Status[]), CLAIM];
+/** Продажі — усе до договору; Виробництво — від договору, плюс Рекламація. */
+const SALES: Status[] = STATUSES.slice(0, CONTRACT_INDEX - 1) as Status[];
+const PROD: Status[] = [...(STATUSES.slice(CONTRACT_INDEX - 1) as Status[]), CLAIM];
 
 /** 7. CRM — дошка замовлень за статусами з перетягуванням. */
 export function Crm() {

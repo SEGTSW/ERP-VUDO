@@ -1,6 +1,7 @@
 /** Переходи статусів (ТЗ розділ 4): умови входу, вікна переходу, автоматичні дії. Уся перевірка — тут, на сервері. */
 import {
   CLAIM,
+  CONTRACT_INDEX,
   REFUSAL,
   STATUSES,
   STATUS_COMPLETES,
@@ -143,7 +144,7 @@ export async function moveStatus(
   // Пройдені статуси: від наступного після поточного до цільового (вперед) або лише цільовий.
   const crossed: Status[] = fi > 0 && ti > fi ? (STATUSES.slice(fi, ti) as MainStatus[]) : [to];
 
-  const contractNow = (ti >= 6 || to === CLAIM) && !o.contractDate;
+  const contractNow = (ti >= CONTRACT_INDEX || to === CLAIM) && !o.contractDate;
   if (contractNow) {
     set('contract_date', today);
     set('contract_price', calc.price);

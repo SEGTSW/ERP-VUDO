@@ -3,7 +3,7 @@
  *  - офіс (менеджер, власник): усе, крім звітності; власник — ще маржа і чистий прибуток;
  *  - виконавці: жодних сум, цін, оплат; без файлів «Прорахунки / специфікації» та історії.
  */
-import { afterContract, isOwner, kyivToday, money, statusIndex, type Settings } from '@vudo/shared';
+import { afterContract, isOwner, kyivToday, money, type Settings } from '@vudo/shared';
 import type { Db } from '../db.js';
 import { visibleLogSql } from '../audit.js';
 import type { User } from '../users.js';
@@ -43,7 +43,7 @@ async function peopleNames(db: Db, ids: number[]): Promise<Map<number, string>> 
 export function nextStep(o: OrderAgg, s: Settings, names: Map<number, string>, today = kyivToday()): { text: string; cls: '' | 'warn' | 'late' } {
   const { calc, late, items } = compute(o, s, today);
   if (o.status === 'Змонтовано' && calc.debt > 0) return { text: `Отримати доплату ${money(calc.debt)}`, cls: 'warn' };
-  if (statusIndex(o.status) >= 6 && o.status !== 'Закрито') {
+  if (afterContract(o.status) && o.status !== 'Закрито') {
     const sch = taskSchedule(o, today);
     const open = o.tasks
       .filter((t) => t.progress < 100)
@@ -60,18 +60,21 @@ export function nextStep(o: OrderAgg, s: Settings, names: Map<number, string>, t
   const noPrice = !o.items.length || o.items.some((i) => !((items.get(i.id)?.price ?? 0) > 0));
   const installers = o.installerIds.map((id) => names.get(id)).filter(Boolean).join(', ');
   const map: Record<string, string> = {
-    'Звернення': 'Призначити замір',
+    'Звернення': 'Зробити прорахунок',
+    'Прорахунок': noPrice ? 'Вказати ціни виробів' : 'Призначити замір',
     'Замір призначено': `Замір ${ddmm(o.measureDate)}${o.measurerId ? ` · ${names.get(o.measurerId) ?? ''}` : ''}`,
-    'Замір виконано': 'Зробити прорахунок',
-    'Прорахунок': noPrice ? 'Вказати ціни виробів' : 'Надіслати пропозицію',
+    'Замір виконано': noPrice ? 'Уточнити ціни виробів' : 'Надіслати пропозицію',
     'Очікує рішення клієнта': 'Зателефонувати клієнту',
-    'Договір / аванс отримано': 'Передати в проєктування',
+    'Проєктування': 'Погодити проєкт з клієнтом',
+    'Проєкт погоджено': 'Підписати договір, отримати аванс',
+    'Договір / аванс отримано': 'Закупити матеріали',
     'Готово до відвантаження': 'Призначити доставку й монтаж',
     'Доставка / монтаж призначено': `Монтаж ${ddmm(o.installDate)}${installers ? ` · ${installers}` : ''}`,
     'Змонтовано': 'Закрити замовлення',
     'Закрито': 'Завершено',
     'Рекламація': 'Вирішити рекламацію',
   };
+
   return { text: map[o.status] ?? 'Перевести на наступний етап', cls: late ? 'late' : '' };
 }
 

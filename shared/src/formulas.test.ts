@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { calcItem, calcOrder, lateDays, netProfit, priceDiff, priceFromCost, type ItemInput } from './formulas.js';
 import { money, fmtDate, fmtDateTime, kyivToday, phoneKey } from './format.js';
 import { navFor, startSection, moneyAccess } from './roles.js';
+import { STATUSES, statusGroup } from './constants.js';
+import { afterContract, nextStatuses, stagePassed } from './status.js';
 
 const item = (pre: number, exact: number | null = null, dp = 0): ItemInput => ({
   pre: { korpus: pre },
@@ -125,5 +127,27 @@ describe('формати і ролі', () => {
     expect(startSection({ roles: ['Монтажник'] })).toBe('myday');
     expect(startSection({ roles: ['Цех'], startSection: 'finance' })).toBe('orders');
     expect(moneyAccess({ roles: ['Цех', 'Менеджер'] })).toBe('pay');
+  });
+});
+
+describe('порядок статусів (погоджено із замовником)', () => {
+  it('Звернення → Прорахунок → Замір → Очікування → Проєктування → Договір', () => {
+    expect(STATUSES.slice(0, 8)).toEqual([
+      'Звернення', 'Прорахунок', 'Замір призначено', 'Замір виконано', 'Очікує рішення клієнта', 'Проєктування', 'Проєкт погоджено', 'Договір / аванс отримано',
+    ]);
+    expect(nextStatuses('Звернення')).toEqual(['Прорахунок', 'Відмова']);
+    expect(nextStatuses('Проєкт погоджено')).toEqual(['Договір / аванс отримано', 'Відмова']);
+    expect(nextStatuses('Договір / аванс отримано')).toEqual(['Закупівля матеріалів']);
+  });
+
+  it('до договору — продажі; договір фіксує «після договору»; етапи плану за статусами', () => {
+    expect(statusGroup('Проєкт погоджено')).toBe('sale');
+    expect(statusGroup('Договір / аванс отримано')).toBe('work');
+    expect(afterContract('Проєкт погоджено')).toBe(false);
+    expect(afterContract('Договір / аванс отримано')).toBe(true);
+    expect(stagePassed('Замір виконано', 'Замір')).toBe(true);
+    expect(stagePassed('Замір виконано', 'Прорахунок')).toBe(false);
+    expect(stagePassed('Проєкт погоджено', 'Конструктив')).toBe(true);
+    expect(stagePassed('Договір / аванс отримано', 'Збірка')).toBe(false);
   });
 });

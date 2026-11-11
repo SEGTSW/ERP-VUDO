@@ -2,13 +2,13 @@
 
 export const STATUSES = [
   'Звернення',
+  'Прорахунок',
   'Замір призначено',
   'Замір виконано',
-  'Прорахунок',
   'Очікує рішення клієнта',
-  'Договір / аванс отримано',
   'Проєктування',
   'Проєкт погоджено',
+  'Договір / аванс отримано',
   'Закупівля матеріалів',
   'У виробництві',
   'Готово до відвантаження',
@@ -28,11 +28,17 @@ export const ALL_STATUSES: readonly Status[] = [...STATUSES, CLAIM, REFUSAL];
 
 export type StatusGroup = 'sale' | 'work' | 'field' | 'done' | 'bad';
 
-/** Група статусу: 1–5 продажі, 6–11 робота, 12–13 виїзд, 14 закрито, Відмова/Рекламація — проблема. */
+/**
+ * Порядок статусів погоджено із замовником (змінено відносно ТЗ v1.0):
+ * до договору — 1–7 (прорахунок, замір, проєктування), договір — 8.
+ */
+export const CONTRACT_INDEX = 8;
+
+/** Група статусу: 1–7 продажі (до договору), 8–11 робота, 12–13 виїзд, 14 закрито, Відмова/Рекламація — проблема. */
 export function statusGroup(s: Status): StatusGroup {
   if (s === REFUSAL || s === CLAIM) return 'bad';
   const i = STATUSES.indexOf(s);
-  if (i < 5) return 'sale';
+  if (i < CONTRACT_INDEX - 1) return 'sale';
   if (i < 11) return 'work';
   if (s === 'Закрито') return 'done';
   return 'field';

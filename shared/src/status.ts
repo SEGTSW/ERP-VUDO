@@ -1,5 +1,5 @@
 /** Статуси і переходи (ТЗ розділ 4). Спільні для сервера (перевірка) і інтерфейсу (кнопки, вікна). */
-import { CLAIM, REFUSAL, STATUSES, statusIndex, type PlanStage, type Status } from './constants.js';
+import { CLAIM, CONTRACT_INDEX, REFUSAL, STATUSES, statusIndex, type PlanStage, type Status } from './constants.js';
 
 /** Кнопки «Перевести в»: наступний крок, Відмова (до договору), Рекламація (після монтажу). */
 export function nextStatuses(s: Status): Status[] {
@@ -8,15 +8,15 @@ export function nextStatuses(s: Status): Status[] {
   const i = statusIndex(s);
   const r: Status[] = [];
   if (i < STATUSES.length) r.push(STATUSES[i]!);
-  if (i <= 5) r.push(REFUSAL);
+  if (i < CONTRACT_INDEX) r.push(REFUSAL);
   if (i >= 13) r.push(CLAIM);
   return r;
 }
 
-/** Чи доступний статус у перемикачі (Відмова — лише з 1–5, Рекламація — лише з 13–14). */
+/** Чи доступний статус у перемикачі (Відмова — лише до договору, Рекламація — лише з 13–14). */
 export function switchAllowed(from: Status, to: Status): boolean {
   const i = statusIndex(from);
-  if (to === REFUSAL) return from !== REFUSAL && i >= 1 && i <= 5;
+  if (to === REFUSAL) return from !== REFUSAL && i >= 1 && i < CONTRACT_INDEX;
   if (to === CLAIM) return from === CLAIM || i >= 13;
   return true;
 }
@@ -65,14 +65,14 @@ export const STATUS_COMPLETES: Partial<Record<Status, PlanStage>> = {
   'Змонтовано': 'Монтаж',
 };
 
-/** Етап уже пройдено за статусом (створюється виконаним): Замір — від 3, Прорахунок — від 5, Конструктив — від 8, Збірка — від 11, Монтаж — від 13. */
+/** Етап уже пройдено за статусом (створюється виконаним) — за статусом, що його завершує (STATUS_COMPLETES). */
 export function stagePassed(s: Status, stage: PlanStage): boolean {
   if (s === CLAIM) return true;
-  const need: Record<PlanStage, number> = { 'Прорахунок': 5, 'Замір': 3, 'Конструктив': 8, 'Збірка': 11, 'Монтаж': 13 };
-  return statusIndex(s) >= need[stage];
+  const by = Object.entries(STATUS_COMPLETES).find(([, st]) => st === stage)?.[0] as Status | undefined;
+  return !!by && statusIndex(s) >= statusIndex(by);
 }
 
-/** Статус «після договору» (≥ 6 або Рекламація). */
-export const afterContract = (s: Status) => s === CLAIM || statusIndex(s) >= 6;
+/** Статус «після договору» (Договір і далі, або Рекламація). */
+export const afterContract = (s: Status) => s === CLAIM || statusIndex(s) >= CONTRACT_INDEX;
 /** Після монтажу (Змонтовано, Закрито, Рекламація). */
 export const afterInstall = (s: Status) => s === CLAIM || statusIndex(s) >= 13;

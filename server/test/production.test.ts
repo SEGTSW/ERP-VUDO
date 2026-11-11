@@ -97,6 +97,7 @@ describe('дата заміру — факт від менеджера', () => {
   it('«Замір виконано» раніше за дату заміру — етап лишається на даті заміру', async () => {
     const { o, m, ids } = await setup();
     const d = addDays(today, 1);
+    await m.post(`/api/orders/${o.id}/status`, { to: 'Прорахунок', mode: 'step' });
     await m.post(`/api/orders/${o.id}/status`, { to: 'Замір призначено', mode: 'step', values: { address: 'Ірпінь', measureDate: d, measurerId: ids.taras } });
     const r = await m.post(`/api/orders/${o.id}/status`, { to: 'Замір виконано', mode: 'step' });
     expect(r.body.tasks.find((x: { stage: string }) => x.stage === 'Замір')).toMatchObject({ startDate: d, days: 1, progress: 100 });
@@ -113,6 +114,7 @@ describe('дата заміру — факт від менеджера', () => {
   it('дата з вікна «Замір призначено» теж ставить етап', async () => {
     const { o, m, ids } = await setup();
     const d = addDays(today, 1);
+    await m.post(`/api/orders/${o.id}/status`, { to: 'Прорахунок', mode: 'step' });
     const r = await m.post(`/api/orders/${o.id}/status`, { to: 'Замір призначено', mode: 'step', values: { address: 'Ірпінь', measureDate: d, measurerId: ids.taras } });
     expect(r.body.tasks.find((x: { stage: string }) => x.stage === 'Замір')).toMatchObject({ startDate: d, days: 1 });
   });
