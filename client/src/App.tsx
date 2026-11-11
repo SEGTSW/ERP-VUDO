@@ -12,6 +12,7 @@ import { Clients } from './pages/Clients';
 import { Plan } from './pages/Plan';
 import { MyDay } from './pages/MyDay';
 import { Stock } from './pages/Stock';
+import { Finance } from './pages/Finance';
 
 const PAGES: Partial<Record<Section, () => React.JSX.Element>> = {
   orders: Orders,
@@ -20,6 +21,7 @@ const PAGES: Partial<Record<Section, () => React.JSX.Element>> = {
   plan: Plan,
   myday: MyDay,
   stock: Stock,
+  finance: Finance,
   notes: Notes,
   settings: Settings,
 };

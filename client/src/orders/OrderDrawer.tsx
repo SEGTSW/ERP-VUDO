@@ -14,6 +14,7 @@ import { PlanTab } from './tabs/PlanTab';
 import { CommentsTab } from './tabs/CommentsTab';
 import { ExecInfoTab, ExecItemsTab } from './tabs/ExecTabs';
 import { IssueModal, OrderTopBlocks } from './Issues';
+import { CostsTab, useCosts } from './tabs/CostsTab';
 
 /** Картка замовлення — панель справа поверх будь-якого розділу. */
 export function OrderDrawer({ id }: { id: number }) {
@@ -38,18 +39,21 @@ export function OrderDrawer({ id }: { id: number }) {
   );
 }
 
-type OfficeTab = 'main' | 'items' | 'exact' | 'files' | 'pay' | 'plan' | 'com' | 'hist';
+type OfficeTab = 'main' | 'items' | 'exact' | 'files' | 'pay' | 'cost' | 'plan' | 'com' | 'hist';
 
 function OfficeOrder({ o }: { o: OfficeCard }) {
   const { close, tab, setTab } = useDrawer();
   const [move, setMove] = useState<{ to: Status; mode: 'step' | 'jump' } | null>(null);
   const exactDone = o.items.filter((i) => i.calc.exactCost != null).length;
+  // Вкладка «Витрати» — лише власник (у менеджера її немає)
+  const costs = useCosts(o.id, !!o.owner);
   const tabs: [OfficeTab, string][] = [
     ['main', 'Загальне'],
     ['items', `Попередній прорахунок (${o.items.length})`],
     ['exact', `Точний прорахунок${o.items.length ? ` (${exactDone}/${o.items.length})` : ''}`],
     ['files', `Файли (${visibleFileCount(o.files, true)})`],
     ['pay', `Оплати (${o.payments.length})`],
+    ...(o.owner ? ([['cost', `Витрати (${costs.data?.rows.length ?? 0})`]] as [OfficeTab, string][]) : []),
     ['plan', `План (${o.tasks.length})`],
     ['com', `Коментарі (${o.comments.length})`],
     ['hist', 'Історія'],
@@ -186,6 +190,7 @@ function OfficeOrder({ o }: { o: OfficeCard }) {
         {cur === 'exact' && <ExactTab o={o} />}
         {cur === 'files' && <FilesTab id={o.id} files={o.files} office designer={o.designer} isDesign={o.source === 'дизайнер'} />}
         {cur === 'pay' && <PayTab o={o} />}
+        {cur === 'cost' && o.owner && <CostsTab orderId={o.id} />}
         {cur === 'plan' && <PlanTab orderId={o.id} num={o.num} clientName={o.client.name} tasks={o.tasks} items={o.items} />}
         {cur === 'com' && <CommentsTab id={o.id} comments={o.comments} />}
         {cur === 'hist' && (
