@@ -243,19 +243,31 @@ export function compute(o: OrderAgg, s: Settings, today = kyivToday()): Computed
 export const opexOf = (o: OrderAgg, price: number, s: Settings) =>
   o.opex != null ? o.opex : Math.round((price * s.opexPct) / 100);
 
-/** Маржа і чистий прибуток (лише для власника). Фактичні витрати з обліку додадуться на етапі «Фінанси». */
-export function ownerFigures(o: OrderAgg, c: OrderCalc, s: Settings) {
+/** Маржа і чистий прибуток (лише для власника) з фактичними витратами обліку (ТЗ 14, п. 14). */
+export function ownerFigures(o: OrderAgg, c: OrderCalc, s: Settings, facts: { materials: number; collab: number } = { materials: 0, collab: 0 }) {
   const opex = opexOf(o, c.price, s);
   const np = netProfit({
     price: c.price,
     cost: c.cost,
     designer: c.designer,
     opex,
-    materialsFact: 0,
-    collabFact: 0,
+    materialsFact: facts.materials,
+    collabFact: facts.collab,
     status: o.status,
   });
-  return { margin: c.margin, marginPct: c.marginPct, opex, opexAuto: o.opex == null, netProfit: np.profit, netPct: np.pct };
+  const closed = o.status === 'Закрито' && facts.materials > 0;
+  return {
+    margin: c.margin,
+    marginPct: c.marginPct,
+    opex,
+    opexAuto: o.opex == null,
+    netProfit: np.profit,
+    netPct: np.pct,
+    netCost: np.cost,
+    netCostSrc: closed ? 'факт' : facts.materials > c.cost ? 'факт (більше плану)' : 'за прорахунком',
+    netDesigner: np.designer,
+    netDesignerSrc: facts.collab && facts.collab >= c.designer ? 'виплачено (Співпраці)' : c.designerShares >= c.partnerBonus ? 'закладено в ціну' : 'бонус дизайнеру',
+  };
 }
 
 export function taskSchedule(o: OrderAgg, today = kyivToday()): Map<number, TaskSchedule> {

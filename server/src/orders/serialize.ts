@@ -8,6 +8,7 @@ import type { Db } from '../db.js';
 import { visibleLogSql } from '../audit.js';
 import type { User } from '../users.js';
 import { compute, ownerFigures, taskSchedule, type OrderAgg } from './repo.js';
+import { orderFacts } from '../finance/cash.js';
 
 /** Відкриті проблеми (брак / нестача) замовлення — блок угорі картки. */
 async function openIssues(db: Db, orderId: number) {
@@ -208,7 +209,7 @@ export async function officeCard(db: Db, o: OrderAgg, s: Settings, me: User) {
     issues: await openIssues(db, o.id),
     reserved: await reserved(db, o.id),
     sums: calc,
-    owner: isOwner(me) ? ownerFigures(o, calc, s) : null,
+    owner: isOwner(me) ? ownerFigures(o, calc, s, await orderFacts(db, o.id)) : null,
     markupPct: s.markupPct,
   };
 }
