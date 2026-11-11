@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+uploads/
+*.log
+.DS_Store
+coverage/
+
+# Налаштування IDE — особисті для кожного розробника
+.idea/
+*.iml
+
+# Тестовий файл з першої спроби
+/index.js
