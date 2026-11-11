@@ -33,27 +33,27 @@ describe('планування (розділ 8)', () => {
     const calc = task('Прорахунок');
     const m = await loginAs('iryna');
     expect((await m.patch(`/api/plan/tasks/${calc.id}`, { days: 2, startDate: today, progress: 0, comment: '' })).status).toBe(200);
-    const zamir = task('Замір');
-    const t = await loginAs('taras');
-    expect((await t.patch(`/api/plan/tasks/${zamir.id}`, { days: 3, startDate: null, progress: 50, comment: '' })).status).toBe(200);
-    // Конструктор не може змінити чужий етап
-    expect((await mr.patch(`/api/plan/tasks/${zamir.id}`, { days: 5, startDate: null, progress: 0, comment: '' })).status).toBe(403);
-    const plan = (await t.get('/api/plan')).body;
-    const z = plan.tasks.find((x: { id: number }) => x.id === zamir.id);
-    // Замір починається одразу після Прорахунку (2 дні від сьогодні)
+    const constr = task('Конструктив');
+    expect((await mr.patch(`/api/plan/tasks/${constr.id}`, { days: 3, startDate: null, progress: 50, comment: '' })).status).toBe(200);
+    // Цех не може змінити чужий етап
+    const rm = await loginAs('roman');
+    expect((await rm.patch(`/api/plan/tasks/${constr.id}`, { days: 5, startDate: null, progress: 0, comment: '' })).status).toBe(403);
+    const plan = (await mr.get('/api/plan')).body;
+    const z = plan.tasks.find((x: { id: number }) => x.id === constr.id);
+    // Конструктив починається одразу після Прорахунку (2 дні від сьогодні); Замір без дати не займає днів
     expect(z.sched).toMatchObject({ planned: true, start: addDays(today, 2), last: addDays(today, 4) });
     expect(z.orderNum).toBe(o.num);
     expect(JSON.stringify(plan)).not.toMatch(/price|грн/);
-    expect((await logTexts()).at(-1)).toBe('План «Шафа-купе» · Замір: днів — → 3, виконано 50%');
+    expect((await logTexts()).at(-1)).toBe('План «Шафа-купе» · Конструктив: днів — → 3, виконано 50%');
   });
 
   it('прострочений етап червоний; наступні починаються не раніше за сьогодні', async () => {
     const { task, m } = await setup();
     await m.patch(`/api/plan/tasks/${task('Прорахунок').id}`, { days: 2, startDate: addDays(today, -10), progress: 30, comment: '' });
-    await m.patch(`/api/plan/tasks/${task('Замір').id}`, { days: 1, startDate: null, progress: 0, comment: '' });
+    await m.patch(`/api/plan/tasks/${task('Конструктив').id}`, { days: 1, startDate: null, progress: 0, comment: '' });
     const plan = (await m.get('/api/plan')).body;
     const calc = plan.tasks.find((x: { stage: string }) => x.stage === 'Прорахунок');
-    const zam = plan.tasks.find((x: { stage: string }) => x.stage === 'Замір');
+    const zam = plan.tasks.find((x: { stage: string }) => x.stage === 'Конструктив');
     expect(calc.sched).toMatchObject({ late: true, lateBy: 9 });
     expect(zam.sched.start).toBe(today);
   });
@@ -64,8 +64,41 @@ describe('планування (розділ 8)', () => {
     const zamir = task('Замір');
     expect((await t.patch(`/api/plan/tasks/${zamir.id}`, { days: 1, startDate: null, progress: 0, comment: '', assigneeId: ids.oleh })).status).toBe(403);
     expect((await t.patch(`/api/plan/tasks/${zamir.id}`, { days: 1, startDate: null, progress: 55, comment: '' })).body.error).toBe('Виконано — кроком 10 %.');
-    expect((await m.patch(`/api/plan/tasks/${zamir.id}`, { days: 1, startDate: null, progress: 0, comment: '', assigneeId: ids.oleh })).status).toBe(200);
+    expect((await m.patch(`/api/plan/tasks/${zamir.id}`, { days: 1, startDate: today, progress: 0, comment: '', assigneeId: ids.oleh })).status).toBe(200);
     expect((await logTexts()).at(-1)).toContain('відповідальний: Олег Кравець');
+  });
+});
+
+describe('дата заміру — факт від менеджера', () => {
+  it('менеджер ставить дату → етап «Замір» одразу на цій даті; замірник бачить виїзд, але не змінює дату', async () => {
+    const { o, card, m, ids, task } = await setup();
+    const d = addDays(today, 2);
+    await m.patch(`/api/orders/${o.id}`, {
+      clientId: card.client.id, address: 'Київ, Хрещатик 1', source: 'сайт', designerId: null, managerId: ids.iryna, measurerId: ids.taras,
+      constructorId: null, installerIds: [], measureDate: d, installDate: null, readyDate: null, delivery: 0, discount: 0, discountType: 'грн', comment: '',
+    });
+    const t = await loginAs('taras');
+    const plan = (await t.get('/api/plan')).body;
+    const z = plan.tasks.find((x: { stage: string }) => x.stage === 'Замір');
+    expect(z.sched).toMatchObject({ planned: true, start: d, last: d });
+    expect((await t.get(`/api/myday?date=${d}`)).body.visits[0]).toMatchObject({ stage: 'Замір', address: 'Київ, Хрещатик 1' });
+    // замірник дату не змінює, але позначає виконання
+    expect((await t.patch(`/api/plan/tasks/${z.id}`, { days: 1, startDate: addDays(d, 1), progress: 0, comment: '' })).status).toBe(403);
+    expect((await t.patch(`/api/plan/tasks/${z.id}`, { days: 1, startDate: d, progress: 50, comment: '' })).status).toBe(200);
+    // менеджер переносить замір у вікні етапу — дата оновлюється і в картці
+    expect((await m.patch(`/api/plan/tasks/${task('Замір').id}`, { days: 1, startDate: addDays(d, 1), progress: 50, comment: '' })).status).toBe(200);
+    expect((await m.get(`/api/orders/${o.id}`)).body.measureDate).toBe(addDays(d, 1));
+    // новий виріб одразу отримує замір на цю дату
+    const c2 = await m.post(`/api/orders/${o.id}/items`, { name: 'Комод', type: 'інше', description: '', pre: { korpus: 1000 }, designerPct: null });
+    const z2 = c2.body.tasks.find((x: { stage: string; itemName: string }) => x.stage === 'Замір' && x.itemName === 'Комод');
+    expect(z2).toMatchObject({ startDate: addDays(d, 1), days: 1 });
+  });
+
+  it('дата з вікна «Замір призначено» теж ставить етап', async () => {
+    const { o, m, ids } = await setup();
+    const d = addDays(today, 1);
+    const r = await m.post(`/api/orders/${o.id}/status`, { to: 'Замір призначено', mode: 'step', values: { address: 'Ірпінь', measureDate: d, measurerId: ids.taras } });
+    expect(r.body.tasks.find((x: { stage: string }) => x.stage === 'Замір')).toMatchObject({ startDate: d, days: 1 });
   });
 });
 

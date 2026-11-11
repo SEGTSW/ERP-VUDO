@@ -52,7 +52,8 @@ export function Plan() {
   );
   const planned = filtered.filter((t) => t.sched.planned);
   const unplanned = filtered.filter((t) => !t.sched.planned && t.progress < 100);
-  const mineUnpl = all.filter((t) => t.assigneeId === user.id && !t.sched.planned && t.progress < 100);
+  // Замір сюди не потрапляє: його дату ставить менеджер
+  const mineUnpl = all.filter((t) => t.assigneeId === user.id && t.stage !== 'Замір' && !t.sched.planned && t.progress < 100);
 
   // Групи: за виробами (за замовчуванням) або за відповідальними
   const groups = useMemo(() => {

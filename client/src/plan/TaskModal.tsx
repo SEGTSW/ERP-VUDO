@@ -37,10 +37,13 @@ export function TaskModal({
   const people = usePeople().data ?? [];
   const office = isOffice(user);
   const can = office || task.assigneeId === user.id;
+  // Дату заміру ставить менеджер або власник; замірник лише позначає виконання.
+  const measure = task.stage === 'Замір';
+  const canDates = can && (!measure || office);
   const r = task.sched;
   const [v, setV] = useState({
     assigneeId: task.assigneeId,
-    days: task.days ? String(task.days) : '',
+    days: task.days ? String(task.days) : task.stage === 'Замір' ? '1' : '',
     startDate: task.startDate ?? '',
     progress: task.progress,
     comment: task.comment ?? '',
@@ -69,6 +72,7 @@ export function TaskModal({
       onClose={onClose}
       onSubmit={() => {
         const d = Number(v.days);
+        if (measure && office && !v.startDate) return setErr('Вкажіть дату заміру.');
         if (!Number.isInteger(d) || d < 1 || d > 120) return setErr('Вкажіть кількість днів (від 1 до 120).');
         save.mutate();
       }}
@@ -112,12 +116,14 @@ export function TaskModal({
         </label>
         <label className="f">
           Скільки днів займе *
-          <input inputMode="numeric" value={v.days} disabled={!can} onChange={(e) => setV({ ...v, days: e.target.value.replace(/\D/g, '') })} />
+          <input inputMode="numeric" value={v.days} disabled={!canDates || measure} onChange={(e) => setV({ ...v, days: e.target.value.replace(/\D/g, '') })} />
         </label>
         <label className="f">
-          Початок
-          <input type="date" value={v.startDate} disabled={!can} onChange={(e) => setV({ ...v, startDate: e.target.value })} />
-          <span style={{ fontSize: 11 }}>порожньо — одразу після попереднього етапу</span>
+          {measure ? 'Дата заміру' : 'Початок'}
+          <input type="date" value={v.startDate} disabled={!canDates} onChange={(e) => setV({ ...v, startDate: e.target.value })} />
+          <span style={{ fontSize: 11 }}>
+            {measure ? 'ставить менеджер або власник; змінюється і в картці замовлення' : 'порожньо — одразу після попереднього етапу'}
+          </span>
         </label>
         <label className="f">
           Виконано, %

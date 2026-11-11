@@ -26,7 +26,7 @@ import { DESIGNER, clientSchema, designerLabel, findByPhone, insertClient, valid
 import { compute, fetchOrder, fetchOrders, type OrderAgg } from '../orders/repo.js';
 import { execCard, execList, officeCard, officeList } from '../orders/serialize.js';
 import { moveStatus } from '../orders/status.js';
-import { applyPeople, makePlan } from '../orders/plan.js';
+import { applyPeople, makePlan, syncMeasureTasks } from '../orders/plan.js';
 import { checkPerson, namesOf } from '../orders/people.js';
 
 export const ordersRouter = Router();
@@ -304,6 +304,7 @@ ordersRouter.patch('/orders/:id', requireOffice, async (req, res) => {
       diffLine('Знижка', `${o.discount} ${o.discountType}`, `${b.discount} ${b.discountType}`),
     ].filter(Boolean);
 
+    if ((o.measureDate ?? null) !== b.measureDate) await syncMeasureTasks(c, id, b.measureDate);
     const updated = await applyPeople(c, {
       id,
       status: o.status,

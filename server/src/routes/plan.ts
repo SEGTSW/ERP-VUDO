@@ -68,6 +68,10 @@ planRouter.patch('/plan/tasks/:id', async (req, res) => {
   const office = isOffice(u);
   if (!office && t.assigneeId !== u.id) throw forbidden('Змінювати етап може відповідальний або менеджер.');
   if (b.assigneeId != null && b.assigneeId !== t.assigneeId && !office) throw forbidden('Відповідального змінює лише менеджер або адмін.');
+  // Дату заміру ставить менеджер або власник; замірник лише позначає виконання.
+  const measureMoved = t.stage === 'Замір' && (b.days !== t.days || b.startDate !== (t.startDate ?? null));
+  if (measureMoved && !office) throw forbidden('Дату заміру ставить менеджер або власник у картці замовлення.');
+  if (t.stage === 'Замір' && office && !b.startDate) throw badRequest('Вкажіть дату заміру (поле «Початок»).');
   await tx(async (c) => {
     let assignee = t.assigneeId;
     let assigneeName: string | null = null;
@@ -83,6 +87,15 @@ planRouter.patch('/plan/tasks/:id', async (req, res) => {
     );
     // Хтось інший щойно змінив етап — не перезаписуємо мовчки.
     if (!r.rowCount) throw badRequest('Етап щойно змінив хтось інший. Відкрийте його ще раз.');
+    // Нова дата заміру — і в картці замовлення, і в інших виробах цього замовлення.
+    if (measureMoved && b.startDate !== o.measureDate) {
+      await c.query('UPDATE orders SET measure_date = $2 WHERE id = $1', [o.id, b.startDate]);
+      await c.query(
+        `UPDATE plan_tasks SET start_date = $2, days = 1 WHERE order_id = $1 AND stage = 'Замір' AND progress < 100 AND id <> $3`,
+        [o.id, b.startDate, id],
+      );
+      await writeLog(c, { userId: u.id, orderId: o.id, folder: 'zamir', text: `Дата заміру: ${o.measureDate ? fmtDate(o.measureDate) : '—'} → ${fmtDate(b.startDate!)}` });
+    }
     const ch = [
       t.days !== b.days ? `днів ${t.days ?? '—'} → ${b.days}` : null,
       (t.startDate ?? null) !== b.startDate ? `початок: ${b.startDate ? fmtDate(b.startDate) : 'одразу після попереднього'}` : null,

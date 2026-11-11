@@ -9,6 +9,8 @@ interface OrderPeople {
   measurerId: number | null;
   constructorId: number | null;
   installerIds: number[];
+  /** Дата заміру з картки: етап «Замір» стоїть саме на ній (1 день). */
+  measureDate?: string | null;
 }
 
 const STAGE_ROLE: Record<PlanStage, Role> = {
@@ -48,10 +50,12 @@ export async function makePlan(db: Db, o: OrderPeople, itemId: number, today = k
   for (const [k, st] of PLAN_STAGES.entries()) {
     const assignee = fromCard(o, st) ?? (await firstActive(db, STAGE_ROLE[st]));
     const done = stagePassed(o.status, st);
+    // Замір із призначеною датою — одразу запланований на цю дату.
+    const measured = !done && st === 'Замір' && o.measureDate;
     await db.query(
       `INSERT INTO plan_tasks (order_id, item_id, stage, idx, assignee_id, start_date, days, progress)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (item_id, stage) DO NOTHING`,
-      [o.id, itemId, st, k + 1, assignee, done ? today : null, done ? 1 : null, done ? 100 : 0],
+      [o.id, itemId, st, k + 1, assignee, done ? today : measured ? o.measureDate : null, done || measured ? 1 : null, done ? 100 : 0],
     );
   }
 }
@@ -97,5 +101,17 @@ export async function completeStage(db: Db, orderId: number, stage: PlanStage, t
             days = COALESCE(days, 1)
       WHERE order_id = $1 AND stage = $2 AND progress < 100`,
     [orderId, stage, today],
+  );
+}
+
+/**
+ * Дату заміру ставить менеджер або власник — і вона одразу стає фактом у плані:
+ * незавершені етапи «Замір» стають на цю дату (1 день). Без дати — етап знову без днів.
+ */
+export async function syncMeasureTasks(db: Db, orderId: number, measureDate: string | null): Promise<void> {
+  await db.query(
+    `UPDATE plan_tasks SET start_date = $2::date, days = CASE WHEN $2::date IS NULL THEN NULL ELSE 1 END
+      WHERE order_id = $1 AND stage = 'Замір' AND progress < 100`,
+    [orderId, measureDate],
   );
 }

@@ -19,7 +19,7 @@ import type pg from 'pg';
 import { badRequest } from '../errors.js';
 import { writeLog } from '../audit.js';
 import { compute, type OrderAgg } from './repo.js';
-import { completeStage, makeMissingPlans } from './plan.js';
+import { completeStage, makeMissingPlans, syncMeasureTasks } from './plan.js';
 
 /** Умова входу в статус; повертає текст, що зробити, або null. */
 export function precheck(o: OrderAgg, to: Status, s: Settings): string | null {
@@ -161,7 +161,9 @@ export async function moveStatus(
     measurerId: fields.some((f) => f.key === 'measurerId') ? v.measurerId! : o.measurerId,
     constructorId: o.constructorId,
     installerIds: fields.some((f) => f.key === 'installerIds') ? v.installerIds! : o.installerIds,
+    measureDate: fields.some((f) => f.key === 'measureDate') ? v.measureDate! : o.measureDate,
   };
+  if (fields.some((f) => f.key === 'measureDate')) await syncMeasureTasks(c, o.id, v.measureDate!);
   if (contractNow) {
     const made = await makeMissingPlans(c, people, today);
     if (made.length) {
