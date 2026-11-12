@@ -3,8 +3,14 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "workspaces": ["shared", "server", "client"],
-  "engines": { "node": ">=22" },
+  "workspaces": [
+    "shared",
+    "server",
+    "client"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "npm run migrate -w server && concurrently -n api,web -c cyan,green \"npm run dev -w server\" \"npm run dev -w client\"",
     "build": "npm run build -w client && npm run build -w server",
@@ -17,5 +23,8 @@
   "devDependencies": {
     "concurrently": "^9.0.0",
     "typescript": "^5.9.0"
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
   }
 }

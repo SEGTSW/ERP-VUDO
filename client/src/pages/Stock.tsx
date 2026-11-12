@@ -4,7 +4,7 @@ import { fmtDate } from '@vudo/shared';
 import { api, errorText } from '../api';
 import type { OrderListItem, StockRow } from '../types';
 import { ConfirmButton, Modal, WarnBox } from '../ui/common';
-import { RowLink } from '../ui/bits';
+import { RowLink, XlButton } from '../ui/bits';
 import { useToast } from '../ui/toast';
 
 const KINDS = ['Плита', 'Стільниця', 'Фурнітура', 'Профіль', 'Інше'] as const;
@@ -76,6 +76,7 @@ export function Stock() {
     <>
       <div className="bar">
         <h1 className="grow">Склад залишків</h1>
+        <XlButton section="stock" />
         <button type="button" className="btn pri" onClick={() => setModal({ kind: 'edit', x: null })}>
           + На склад
         </button>

@@ -58,3 +58,15 @@ export function kmoney(n: number): string {
   if (a < 1000) return String(Math.round(n));
   return `${(n / 1000).toLocaleString('uk-UA', { maximumFractionDigits: a >= 100000 ? 0 : 1 })} тис`;
 }
+
+/** Кнопка «⬇ Excel» у шапці розділу: файл формує сервер з даних, дозволених ролі. */
+export function XlButton({ section, params }: { section: string; params?: Record<string, string | number | null | undefined> }) {
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries(params ?? {})) if (v != null && v !== '') p.set(k, String(v));
+  const qs = p.toString();
+  return (
+    <a className="btn" href={`/api/export/${section}${qs ? `?${qs}` : ''}`} download title="Завантажити у форматі Excel (.xlsx)">
+      ⬇ Excel
+    </a>
+  );
+}

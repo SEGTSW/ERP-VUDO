@@ -6,7 +6,7 @@ import { useMe } from '../session';
 import { useDrawer } from '../orders/hooks';
 import { CashModal, useArticles, useRefreshFinance, type ArticleRow, type CashRow } from '../finance/CashModal';
 import { ConfirmButton, Modal, WarnBox } from '../ui/common';
-import { SubTabs } from '../ui/bits';
+import { SubTabs, XlButton } from '../ui/bits';
 import { useToast } from '../ui/toast';
 import { PnlTab } from '../finance/PnlTab';
 import { FixedTab } from '../finance/FixedTab';
@@ -41,6 +41,7 @@ export function Finance() {
     <>
       <div className="bar">
         <h1 className="grow">{owner ? 'Фінанси' : 'Оплати'}</h1>
+        <XlButton section="finance" />
       </div>
       <div style={{ marginBottom: 14 }}>
         <SubTabs tabs={tabs} cur={tab} onChange={setTab} />

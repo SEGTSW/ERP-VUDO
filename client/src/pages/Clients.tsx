@@ -6,7 +6,7 @@ import type { ClientCard, ClientFull, ClientRow } from '../types';
 import { useDrawer } from '../orders/hooks';
 import { NewOrderModal } from '../orders/NewOrderModal';
 import { ConfirmButton, Modal, WarnBox } from '../ui/common';
-import { Drawer, RowLink, StatusPill, SubTabs } from '../ui/bits';
+import { Drawer, RowLink, StatusPill, SubTabs, XlButton } from '../ui/bits';
 import { useToast } from '../ui/toast';
 
 const DESIGNER = 'дизайнер-партнер';
@@ -50,6 +50,7 @@ export function Clients() {
     <>
       <div className="bar">
         <h1 className="grow">Клієнти</h1>
+        <XlButton section={tab === 'des' ? 'designers' : 'clients'} params={{ archived: archived ? 1 : 0 }} />
         {tab === 'cl' ? (
           <button type="button" className="btn pri" onClick={() => setModal('client')}>
             + Новий клієнт

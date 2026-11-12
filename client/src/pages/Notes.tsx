@@ -4,6 +4,7 @@ import { LOG_FOLDERS, fmtDateTime, folderLabel, isOwner, isOffice, type LogFolde
 import { api } from '../api';
 import { useMe } from '../session';
 import { useDrawer } from '../orders/hooks';
+import { XlButton } from '../ui/bits';
 import type { LogPage } from '../types';
 
 type FolderKey = LogFolder | 'all';
@@ -55,6 +56,7 @@ export function Notes() {
     <>
       <div className="bar">
         <h1 className="grow">Повідомлення та журнал змін</h1>
+        <XlButton section="notes" />
       </div>
       <div className="nf-wrap">
         <nav className="nf" aria-label="Папки">

@@ -6,7 +6,7 @@ import type { OfficeCard, OrderListItem } from '../types';
 import { useDrawer } from '../orders/hooks';
 import { NewOrderModal } from '../orders/NewOrderModal';
 import { MoveModal } from '../orders/MoveModal';
-import { kmoney } from '../ui/bits';
+import { XlButton, kmoney } from '../ui/bits';
 import { useToast } from '../ui/toast';
 import { ordersQuery, useManagers } from './Orders';
 
@@ -83,6 +83,7 @@ export function Crm() {
     <>
       <div className="bar">
         <h1 className="grow">CRM</h1>
+        <XlButton section="crm" params={{ q: text, manager, late: late ? 1 : 0 }} />
         <div className="seg">
           <button type="button" aria-current={pipe === 'sales'} onClick={() => setPipe('sales')}>
             Продажі <small>{inSales}</small>

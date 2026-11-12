@@ -63,3 +63,61 @@ describe('база знань (12Б)', () => {
     expect((await m.agent.delete(`/api/kb/${off}`).set('X-VUDO', '1')).status).toBe(200);
   });
 });
+
+describe('експорт в Excel (12А)', () => {
+  async function sheetsOf(buf: Buffer) {
+    const ExcelJS = (await import('exceljs')).default;
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf as unknown as ArrayBuffer);
+    return wb;
+  }
+  const bin = (r: import('supertest').Test) =>
+    r.buffer(true).parse((res, cb) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (c: Buffer) => chunks.push(c));
+      res.on('end', () => cb(null, Buffer.concat(chunks)));
+    });
+
+  it('замовлення: колонки за правами ролі; суми — числами; запис у журнал', async () => {
+    const admin = await makeUser('admin', ['Адмін']);
+    await makeUser('iryna', ['Менеджер']);
+    await makeUser('roman', ['Цех']);
+    const a = await loginAs('admin');
+    const o = (await a.post('/api/orders', { phone: '+380671112233', name: 'Олена', source: 'сайт', managerId: admin })).body;
+    await a.post(`/api/orders/${o.id}/items`, { name: 'Шафа', type: 'інше', description: '', pre: { korpus: 10000 }, designerPct: null });
+
+    const ra = await bin(a.agent.get('/api/export/orders'));
+    expect(ra.status).toBe(200);
+    expect(decodeURIComponent(String(ra.headers['content-disposition']))).toMatch(/VUDO_Замовлення_\d{4}-\d{2}-\d{2}\.xlsx/);
+    const wa = await sheetsOf(ra.body);
+    const head = (ws: import('exceljs').Worksheet) => (ws.getRow(1).values as unknown[]).slice(1);
+    expect(wa.worksheets.map((w) => w.name)).toEqual(['Замовлення', 'Вироби']);
+    expect(head(wa.getWorksheet('Замовлення')!)).toEqual(expect.arrayContaining(['Ціна', 'Чистий прибуток']));
+    const priceCol = head(wa.getWorksheet('Замовлення')!).indexOf('Ціна') + 1;
+    expect(wa.getWorksheet('Замовлення')!.getRow(2).getCell(priceCol).value).toBe(15000);
+    expect(wa.getWorksheet('Замовлення')!.autoFilter).toBeTruthy();
+
+    const m = await loginAs('iryna');
+    const hm = head((await sheetsOf((await bin(m.agent.get('/api/export/orders'))).body)).getWorksheet('Замовлення')!);
+    expect(hm).toContain('Ціна');
+    expect(hm).not.toContain('Чистий прибуток');
+
+    const r = await loginAs('roman');
+    const wr = await sheetsOf((await bin(r.agent.get('/api/export/orders'))).body);
+    expect(wr.worksheets.map((w) => w.name)).toEqual(['Замовлення']);
+    expect(head(wr.getWorksheet('Замовлення')!).join()).not.toMatch(/Ціна|Оплачено|Борг/);
+    expect((await r.get('/api/export/finance')).status).toBe(403);
+    expect(await logTexts()).toContain('Експорт в Excel: Замовлення');
+  });
+
+  it('фінанси: власник — 7 аркушів, менеджер — 2', async () => {
+    await makeUser('admin', ['Адмін']);
+    await makeUser('iryna', ['Менеджер']);
+    const a = await loginAs('admin');
+    const wa = await sheetsOf((await bin(a.agent.get('/api/export/finance'))).body);
+    expect(wa.worksheets.map((w) => w.name)).toEqual(['Облік', 'P&L', 'Оплати', 'Борги', 'Дизайнерам', 'Постійні витрати', 'Статейник']);
+    const m = await loginAs('iryna');
+    const wm = await sheetsOf((await bin(m.agent.get('/api/export/finance'))).body);
+    expect(wm.worksheets.map((w) => w.name)).toEqual(['Оплати', 'Борги']);
+  });
+});

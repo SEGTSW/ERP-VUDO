@@ -8,6 +8,7 @@ import { useDrawer } from '../orders/hooks';
 import { IssueModal, IssuesList } from '../orders/Issues';
 import { useInvalidatePlan } from '../plan/TaskModal';
 import { useToast } from '../ui/toast';
+import { XlButton } from '../ui/bits';
 
 const WD = ['неділя', 'понеділок', 'вівторок', 'середа', 'четвер', "п'ятниця", 'субота'];
 const mapsURL = (a: string) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(a)}`;
@@ -35,6 +36,7 @@ export function MyDay() {
     <>
       <div className="bar">
         <h1 className="grow">{boss ? 'Виїзди' : 'Мій день'}</h1>
+        <XlButton section="myday" params={{ date: day, user: boss ? d?.userId : null }} />
         {boss && !!d?.people.length && (
           <select value={d.userId} onChange={(e) => setWho(Number(e.target.value))} aria-label="Працівник">
             {d.people.map((p) => (

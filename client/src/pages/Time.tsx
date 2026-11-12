@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { TIME_CODES, kyivToday, parseTimeValue, timeTotals } from '@vudo/shared';
 import { api, errorText } from '../api';
 import { useToast } from '../ui/toast';
+import { XlButton } from '../ui/bits';
 
 interface TimeData {
   month: string;
@@ -70,6 +71,7 @@ export function Time() {
     <>
       <div className="bar">
         <h1 className="grow">Табель</h1>
+        <XlButton section="time" params={{ month }} />
       </div>
       <div className="bar day-nav">
         <button type="button" className="btn sm" aria-label="Попередній місяць" onClick={() => setMonth(shift(month, -1))}>

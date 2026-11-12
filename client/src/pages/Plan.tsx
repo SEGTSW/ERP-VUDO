@@ -7,6 +7,7 @@ import { useMe } from '../session';
 import type { PlanData, PlanTaskFull } from '../types';
 import { useDrawer, usePeople } from '../orders/hooks';
 import { TaskModal } from '../plan/TaskModal';
+import { XlButton } from '../ui/bits';
 
 /** Шкала: 28 днів назад і 70 вперед, клітинка — 28 px. */
 const PAST = 28;
@@ -220,6 +221,7 @@ export function Plan() {
     <>
       <div className="bar">
         <h1 className="grow">Планування</h1>
+        <XlButton section="plan" />
         <div className="legend">
           <span>
             <b style={{ background: 'var(--g)' }} />

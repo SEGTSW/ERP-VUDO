@@ -6,7 +6,7 @@ import { useMe } from '../session';
 import type { ExecListItem, OrderListItem } from '../types';
 import { useDrawer, usePeople } from '../orders/hooks';
 import { NewOrderModal } from '../orders/NewOrderModal';
-import { RowLink, StatusPill } from '../ui/bits';
+import { RowLink, StatusPill, XlButton } from '../ui/bits';
 
 export interface OrderFilters {
   q: string;
@@ -51,6 +51,7 @@ function OfficeOrders() {
     <>
       <div className="bar">
         <h1 className="grow">Замовлення</h1>
+        <XlButton section="orders" params={{ q: f.q, status: f.status, manager: f.manager, late: f.late ? 1 : 0, archived: f.archived ? 1 : 0 }} />
         {!!late.data?.count && (
           <button type="button" className="btn warn sm" onClick={() => setF({ ...f, late: true, archived: false })}>
             Прострочених: {late.data.count}
@@ -153,6 +154,7 @@ function ExecOrders() {
     <>
       <div className="bar">
         <h1 className="grow">Замовлення</h1>
+        <XlButton section="orders" params={{ q: text, mine: mine ? 1 : 0 }} />
       </div>
       <div className="bar">
         <input

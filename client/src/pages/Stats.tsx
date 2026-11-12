@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { money } from '@vudo/shared';
 import { api } from '../api';
-import { kmoney } from '../ui/bits';
+import { XlButton, kmoney } from '../ui/bits';
 
 interface Row {
   name: string;
@@ -109,6 +109,7 @@ export function Stats() {
     <>
       <div className="bar">
         <h1 className="grow">Аналітика</h1>
+        <XlButton section="stats" params={{ period }} />
         <div className="seg">
           {(
             [
