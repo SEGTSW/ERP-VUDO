@@ -202,3 +202,24 @@ describe('постійні витрати (10.7, формула 13)', () => {
     expect(p.plan[m]).toMatchObject({ payroll: 95000, marketing: 6000 });
   });
 });
+
+describe('аналітика (11)', () => {
+  it('звернення, договори, середній чек, конверсія; маржа лише власнику; виконавцям — 403', async () => {
+    const { a, o, ids } = await setup();
+    const o2 = (await a.post('/api/orders', { phone: '+380509998877', name: 'Ігор', source: 'Instagram', managerId: ids.iryna })).body;
+    await a.post(`/api/orders/${o2.id}/status`, { to: 'Відмова', mode: 'step', values: { refuseReason: 'Дорого' } });
+    await a.post(`/api/orders/${o.id}/status`, { to: 'Договір / аванс отримано', mode: 'jump' });
+    const st = (await a.get('/api/stats?period=month')).body;
+    expect(st).toMatchObject({ leads: 2, wonCount: 1, wonSum: 15000, avg: 15000, conv: 50, lost: 1, margin: 5000 });
+    expect(st.months).toHaveLength(12);
+    expect(st.months.at(-1)).toMatchObject({ n: 1, v: 15000 });
+    expect(st.sources.find((x: { name: string }) => x.name === 'сайт')).toMatchObject({ leads: 1, won: 1, conv: 100, sum: 15000 });
+    expect(st.types[0]).toMatchObject({ type: 'інше', n: 1, sum: 15000 });
+    expect(st.reasons).toEqual([{ reason: 'Дорого', n: 1 }]);
+    const m = (await (await loginAs('iryna')).get('/api/stats?period=month')).body;
+    expect(m).not.toHaveProperty('margin');
+    expect(JSON.stringify(m)).not.toContain('marginPct');
+    await makeUser('roman', ['Цех']);
+    expect((await (await loginAs('roman')).get('/api/stats')).status).toBe(403);
+  });
+});
