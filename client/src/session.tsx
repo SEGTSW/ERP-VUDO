@@ -31,8 +31,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const setSession = useCallback(
     (s: SessionInfo | null) => {
-      if (!s) qc.clear();
+      // Спершу оновлюємо саму сесію (компонент лишається підписаним на той самий запис),
+      // і лише потім прибираємо дані попереднього користувача.
       qc.setQueryData(KEY, s);
+      if (!s) {
+        void qc.cancelQueries({ predicate: (q) => q.queryKey[0] !== KEY[0] });
+        qc.removeQueries({ predicate: (q) => q.queryKey[0] !== KEY[0] });
+      }
     },
     [qc],
   );

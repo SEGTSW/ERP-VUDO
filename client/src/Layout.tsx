@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { NavLink, useLocation } from 'react-router';
+import { NavLink, useLocation, useNavigate } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { initials } from '@vudo/shared';
 import { api } from './api';
@@ -14,6 +14,7 @@ import { isOffice } from '@vudo/shared';
 export function Layout({ children }: { children: ReactNode }) {
   const { user, nav } = useMe();
   const { logout } = useSession();
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const loc = useLocation();
 
@@ -65,7 +66,7 @@ export function Layout({ children }: { children: ReactNode }) {
               <span>{user.roles.join(', ')}</span>
             </div>
           </div>
-          <button type="button" className="btn sm" onClick={() => void logout()}>
+          <button type="button" className="btn sm" onClick={() => void logout().then(() => navigate('/', { replace: true }))}>
             Вийти
           </button>
         </div>
