@@ -375,7 +375,7 @@ async function planSheets(req: Request): Promise<Sheet[]> {
       cols: [
         { h: 'Замовлення', k: 'orderNum' },
         { h: 'Клієнт', k: 'clientName' },
-        { h: 'Виріб', k: 'itemName' },
+        { h: 'Адреса', k: 'address' },
         { h: 'Етап', k: 'stage' },
         { h: 'Відповідальний', k: 'assigneeName' },
         { h: 'Початок', k: 'start', t: 'date' },

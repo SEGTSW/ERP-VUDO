@@ -36,68 +36,58 @@ export function PlanTab({
     },
     onError: (e) => toast(errorText(e), true),
   });
-  if (!items.length) {
-    return (
-      <div className="sec">
-        <div className="empty">Спершу додайте вироби.</div>
-      </div>
-    );
-  }
   const byId = new Map(tasks.map((t) => [t.id, t]));
+  const list = [...tasks].sort((a, b) => a.idx - b.idx);
   return (
     <>
-      {items.map((i) => {
-        const list = tasks.filter((t) => t.itemId === i.id).sort((a, b) => a.idx - b.idx);
-        return (
-          <div className="sec" key={i.id}>
-            <div className="hd">
-              <h2>{i.name}</h2>
-              {list.length ? (
-                <button type="button" className="btn sm" onClick={() => navigate(`/plan?pOrder=${orderId}`)}>
-                  На діаграмі
-                </button>
-              ) : (
-                office && (
-                  <button type="button" className="btn sm pri" disabled={create.isPending} onClick={() => create.mutate()}>
-                    Створити план етапів
-                  </button>
-                )
-              )}
-            </div>
-            {list.length ? (
-              <div className="list">
-                {list.map((t) => {
-                  const r = t.sched;
-                  return (
-                    <div className="li" key={t.id} style={{ cursor: 'pointer' }} role="button" tabIndex={0} onClick={() => setOpen(t)} onKeyDown={(e) => e.key === 'Enter' && setOpen(t)}>
-                      <div className="m">
-                        <span className={r.planned ? (r.done ? 'st-done' : r.late ? 'st-late' : 'st-ok') : ''}>{t.stage}</span>
-                        <small>{t.assigneeName ?? '—'}</small>
-                      </div>
-                      <div style={{ textAlign: 'right' }}>
-                        {r.planned ? (
-                          <>
-                            <span className="num">
-                              {fmtDate(r.start)} – {fmtDate(r.last)}
-                            </span>
-                            <small>
-                              {t.days} дн. · {t.progress}%{r.late && <b className="st-late"> · прострочено {r.lateBy} дн.</b>}
-                            </small>
-                          </>
-                        ) : (
-                          <small className="debt">дні не вказано</small>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="empty">План для цього виробу ще не створено.</div>
-            )}
+      <div className="sec">
+        <div className="hd">
+          <h2>План робіт по об'єкту</h2>
+          {list.length ? (
+            <button type="button" className="btn sm" onClick={() => navigate(`/plan?pOrder=${orderId}`)}>
+              На діаграмі
+            </button>
+          ) : (
+            office && (
+              <button type="button" className="btn sm pri" disabled={create.isPending} onClick={() => create.mutate()}>
+                Створити план етапів
+              </button>
+            )
+          )}
+        </div>
+        {!!items.length && <small className="muted">Вироби: {items.map((i) => i.name).join(', ')}</small>}
+        {list.length ? (
+          <div className="list">
+            {list.map((t) => {
+              const r = t.sched;
+              return (
+                <div className="li" key={t.id} style={{ cursor: 'pointer' }} role="button" tabIndex={0} onClick={() => setOpen(t)} onKeyDown={(e) => e.key === 'Enter' && setOpen(t)}>
+                  <div className="m">
+                    <span className={r.planned ? (r.done ? 'st-done' : r.late ? 'st-late' : 'st-ok') : ''}>{t.stage}</span>
+                    <small>{t.assigneeName ?? '—'}</small>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    {r.planned ? (
+                      <>
+                        <span className="num">
+                          {fmtDate(r.start)} – {fmtDate(r.last)}
+                        </span>
+                        <small>
+                          {t.days} дн. · {t.progress}%{r.late && <b className="st-late"> · прострочено {r.lateBy} дн.</b>}
+                        </small>
+                      </>
+                    ) : (
+                      <small className="debt">дні не вказано</small>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
-        );
-      })}
+        ) : (
+          <div className="empty">План для цього замовлення ще не створено.</div>
+        )}
+      </div>
       <div className="note">Кожен відповідальний вказує, скільки днів займе його етап. Дні календарні; етапи йдуть ланцюжком.</div>
       {open && <TaskModal task={open} prev={open.sched.prevId ? byId.get(open.sched.prevId) : null} title={`№${num} · ${clientName}`} onClose={() => setOpen(null)} />}
     </>

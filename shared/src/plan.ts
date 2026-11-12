@@ -3,7 +3,8 @@ import { addDays, daysBetween } from './format.js';
 
 export interface TaskInput {
   id: number;
-  itemId: number;
+  /** Ланцюжок етапів — один на замовлення */
+  orderId: number;
   idx: number;
   startDate: string | null;
   days: number | null;
@@ -25,21 +26,21 @@ export interface TaskSchedule {
 }
 
 /**
- * Початок = дата вручну; інакше кінець попереднього запланованого етапу цієї позиції;
+ * Початок = дата вручну; інакше кінець попереднього запланованого етапу цього замовлення;
  * перший — від дати створення замовлення. Кінець = початок + дні.
  * Прострочено: виконано < 100 % і останній день минув; тоді наступні етапи — не раніше за сьогодні.
  */
-export function schedule(tasks: TaskInput[], orderCreated: (itemId: number) => string, today: string): Map<number, TaskSchedule> {
+export function schedule(tasks: TaskInput[], orderCreated: (orderId: number) => string, today: string): Map<number, TaskSchedule> {
   const res = new Map<number, TaskSchedule>();
-  const byItem = new Map<number, TaskInput[]>();
+  const byOrder = new Map<number, TaskInput[]>();
   for (const t of tasks) {
-    const l = byItem.get(t.itemId) ?? [];
+    const l = byOrder.get(t.orderId) ?? [];
     l.push(t);
-    byItem.set(t.itemId, l);
+    byOrder.set(t.orderId, l);
   }
-  for (const [itemId, list] of byItem) {
+  for (const [orderId, list] of byOrder) {
     list.sort((a, b) => a.idx - b.idx);
-    let cur = orderCreated(itemId);
+    let cur = orderCreated(orderId);
     let prev: number | null = null;
     for (const t of list) {
       if (!t.days) {

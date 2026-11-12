@@ -45,30 +45,36 @@ async function firstActive(db: Db, role: Role): Promise<number | null> {
   return r.rows[0]?.id ?? null;
 }
 
-/** Створює 5 етапів для виробу. Етапи, вже пройдені за статусом, — виконані (1 день, 100 %). */
-export async function makePlan(db: Db, o: OrderPeople, itemId: number, today = kyivToday()): Promise<void> {
+/**
+ * Створює 5 етапів для замовлення (один ланцюжок на весь об'єкт).
+ * Етапи, вже пройдені за статусом, — виконані (1 день, 100 %); замір з датою — на цій даті.
+ * Повертає true, якщо план створено (раніше його не було).
+ */
+export async function makePlan(db: Db, o: OrderPeople, today = kyivToday()): Promise<boolean> {
+  const exists = await db.query('SELECT 1 FROM plan_tasks WHERE order_id = $1 LIMIT 1', [o.id]);
+  if (exists.rowCount) return false;
   for (const [k, st] of PLAN_STAGES.entries()) {
     const assignee = fromCard(o, st) ?? (await firstActive(db, STAGE_ROLE[st]));
     const done = stagePassed(o.status, st);
-    // Замір із призначеною датою — одразу запланований на цю дату.
     const measured = !done && st === 'Замір' && o.measureDate;
     await db.query(
-      `INSERT INTO plan_tasks (order_id, item_id, stage, idx, assignee_id, start_date, days, progress)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (item_id, stage) DO NOTHING`,
-      [o.id, itemId, st, k + 1, assignee, done ? today : measured ? o.measureDate : null, done || measured ? 1 : null, done ? 100 : 0],
+      `INSERT INTO plan_tasks (order_id, stage, idx, assignee_id, start_date, days, progress)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (order_id, stage) DO NOTHING`,
+      [o.id, st, k + 1, assignee, done ? today : measured ? o.measureDate : null, done || measured ? 1 : null, done ? 100 : 0],
     );
   }
+  return true;
 }
 
-/** Створює план для виробів замовлення, у яких його ще немає. Повертає назви виробів. */
-export async function makeMissingPlans(db: Db, o: OrderPeople, today = kyivToday()): Promise<string[]> {
-  const r = await db.query<{ id: number; name: string }>(
-    `SELECT i.id, i.name FROM items i WHERE i.order_id = $1
-       AND NOT EXISTS (SELECT 1 FROM plan_tasks t WHERE t.item_id = i.id) ORDER BY i.id`,
-    [o.id],
+/** План для замовлень, у яких його ще немає (наприклад, створених до переходу на план по об'єкту). */
+export async function ensureAllPlans(db: Db): Promise<number> {
+  const r = await db.query<OrderPeople>(
+    `SELECT id, status, manager_id AS "managerId", measurer_id AS "measurerId", constructor_id AS "constructorId",
+            installer_ids AS "installerIds", measure_date AS "measureDate"
+       FROM orders o WHERE NOT EXISTS (SELECT 1 FROM plan_tasks t WHERE t.order_id = o.id)`,
   );
-  for (const i of r.rows) await makePlan(db, o, i.id, today);
-  return r.rows.map((i) => i.name);
+  for (const o of r.rows) await makePlan(db, o);
+  return r.rows.length;
 }
 
 /**

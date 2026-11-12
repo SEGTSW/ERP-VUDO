@@ -145,8 +145,7 @@ export interface OrderComment {
 
 export interface PlanTask {
   id: number;
-  itemId: number;
-  itemName: string;
+  orderId: number;
   stage: PlanStage;
   idx: number;
   assigneeId: number | null;
@@ -259,8 +258,8 @@ export interface ReservedStock {
 }
 
 export interface PlanTaskFull extends PlanTask {
-  orderId: number;
-  itemPos: number;
+  address: string | null;
+  itemNames: string[];
   assigneeRoles: Role[];
   orderNum: string;
   clientName: string;

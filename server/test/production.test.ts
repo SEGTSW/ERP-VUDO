@@ -44,7 +44,7 @@ describe('планування (розділ 8)', () => {
     expect(z.sched).toMatchObject({ planned: true, start: addDays(today, 2), last: addDays(today, 4) });
     expect(z.orderNum).toBe(o.num);
     expect(JSON.stringify(plan)).not.toMatch(/price|грн/);
-    expect((await logTexts()).at(-1)).toBe('План «Шафа-купе» · Конструктив: днів — → 3, виконано 50%');
+    expect((await logTexts()).at(-1)).toBe('План · Конструктив: днів — → 3, виконано 50%');
   });
 
   it('прострочений етап червоний; наступні починаються не раніше за сьогодні', async () => {
@@ -88,10 +88,10 @@ describe('дата заміру — факт від менеджера', () => {
     // менеджер переносить замір у вікні етапу — дата оновлюється і в картці
     expect((await m.patch(`/api/plan/tasks/${task('Замір').id}`, { days: 1, startDate: addDays(d, 1), progress: 50, comment: '' })).status).toBe(200);
     expect((await m.get(`/api/orders/${o.id}`)).body.measureDate).toBe(addDays(d, 1));
-    // новий виріб одразу отримує замір на цю дату
+    // план — один на замовлення: новий виріб не додає етапів
     const c2 = await m.post(`/api/orders/${o.id}/items`, { name: 'Комод', type: 'інше', description: '', pre: { korpus: 1000 }, designerPct: null });
-    const z2 = c2.body.tasks.find((x: { stage: string; itemName: string }) => x.stage === 'Замір' && x.itemName === 'Комод');
-    expect(z2).toMatchObject({ startDate: addDays(d, 1), days: 1 });
+    expect(c2.body.tasks).toHaveLength(5);
+    expect(c2.body.tasks.find((x: { stage: string }) => x.stage === 'Замір')).toMatchObject({ startDate: addDays(d, 1), days: 1 });
   });
 
   it('«Замір виконано» раніше за дату заміру — етап лишається на даті заміру', async () => {
@@ -143,7 +143,7 @@ describe('Мій день (8А.3)', () => {
     expect((await ol.post('/api/myday/done', { taskIds: v.taskIds })).status).toBe(200);
     day = (await ol.get(`/api/myday?date=${addDays(today, 3)}`)).body;
     expect(day.visits[0].done).toBe(true);
-    expect((await logTexts()).at(-1)).toBe('План «Шафа-купе» · Монтаж: виконано 100%');
+    expect((await logTexts()).at(-1)).toBe('План · Монтаж: виконано 100%');
     // менеджер дивиться виїзди будь-якого працівника
     const mm = (await m.get(`/api/myday?user=${ids.oleh}&date=${addDays(today, 3)}`)).body;
     expect(mm.visits).toHaveLength(1);

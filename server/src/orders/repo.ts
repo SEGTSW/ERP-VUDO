@@ -75,7 +75,6 @@ export interface FileRow {
 export interface TaskRow {
   id: number;
   orderId: number;
-  itemId: number;
   stage: PlanStage;
   idx: number;
   assigneeId: number | null;
@@ -170,9 +169,9 @@ export async function fetchOrders(db: Db, where: string, params: unknown[] = [])
       [ids],
     ),
     db.query<TaskRow>(
-      `SELECT t.id, t.order_id AS "orderId", t.item_id AS "itemId", t.stage, t.idx, t.assignee_id AS "assigneeId",
+      `SELECT t.id, t.order_id AS "orderId", t.stage, t.idx, t.assignee_id AS "assigneeId",
               u.name AS "assigneeName", t.start_date AS "startDate", t.days, t.progress, t.comment
-         FROM plan_tasks t LEFT JOIN users u ON u.id = t.assignee_id WHERE t.order_id = ANY($1) ORDER BY t.item_id, t.idx`,
+         FROM plan_tasks t LEFT JOIN users u ON u.id = t.assignee_id WHERE t.order_id = ANY($1) ORDER BY t.order_id, t.idx`,
       [ids],
     ),
   ]);

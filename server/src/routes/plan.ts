@@ -7,7 +7,7 @@ import { badRequest, forbidden, notFound } from '../errors.js';
 import { me, requireOffice, requireSection } from '../auth/middleware.js';
 import { writeLog } from '../audit.js';
 import { fetchOrder, fetchOrders, taskSchedule, type OrderAgg, type TaskRow } from '../orders/repo.js';
-import { makeMissingPlans } from '../orders/plan.js';
+import { makePlan } from '../orders/plan.js';
 import { checkPerson } from '../orders/people.js';
 
 export const planRouter = Router();
@@ -21,8 +21,8 @@ planRouter.get('/plan', requireSection('plan'), async (_req, res) => {
     const sch = taskSchedule(o);
     return o.tasks.map((t) => ({
       ...t,
-      itemName: o.items.find((i) => i.id === t.itemId)?.name ?? '',
-      itemPos: o.items.findIndex((i) => i.id === t.itemId),
+      address: o.address,
+      itemNames: o.items.map((i) => i.name),
       assigneeRoles: t.assigneeId ? (rolesOf.get(t.assigneeId) ?? []) : [],
       orderNum: o.num,
       clientName: o.client.name,
@@ -103,8 +103,7 @@ planRouter.patch('/plan/tasks/:id', async (req, res) => {
       assigneeName ? `відповідальний: ${assigneeName}` : null,
       (t.comment ?? null) !== b.comment && b.comment ? `коментар: ${b.comment.slice(0, 60)}` : null,
     ].filter(Boolean);
-    const item = o.items.find((i) => i.id === t.itemId)?.name ?? '';
-    if (ch.length) await writeLog(c, { userId: u.id, orderId: o.id, folder: 'plan', text: `План «${item}» · ${t.stage}: ${ch.join(', ')}` });
+    if (ch.length) await writeLog(c, { userId: u.id, orderId: o.id, folder: 'plan', text: `План · ${t.stage}: ${ch.join(', ')}` });
   });
   res.json({ ok: true });
 });
@@ -116,9 +115,8 @@ planRouter.post('/orders/:id/plan', requireOffice, async (req, res) => {
   await tx(async (c) => {
     const o = await fetchOrder(c, id, true);
     if (!o) throw notFound('Замовлення не знайдено.');
-    const made = await makeMissingPlans(c, o);
-    if (!made.length) throw badRequest('План для всіх виробів уже створено.');
-    await writeLog(c, { userId: u.id, orderId: id, folder: 'plan', text: `Створено план етапів: ${made.join(', ')}. Відповідальні мають вказати кількість днів.` });
+    if (!(await makePlan(c, o))) throw badRequest('План етапів для цього замовлення вже створено.');
+    await writeLog(c, { userId: u.id, orderId: id, folder: 'plan', text: 'Створено план етапів. Відповідальні мають вказати кількість днів.' });
   });
   res.json({ ok: true });
 });
@@ -276,8 +274,7 @@ planRouter.post('/myday/done', async (req, res) => {
           days = Math.max(1, daysBetween(s.start, today) + 1);
         }
         await c.query('UPDATE plan_tasks SET progress = 100, start_date = $2, days = $3 WHERE id = $1', [t.id, start, days]);
-        const item = o.items.find((i) => i.id === t.itemId)?.name ?? '';
-        await writeLog(c, { userId: u.id, orderId: o.id, folder: t.stage === 'Замір' ? 'zamir' : 'mont', text: `План «${item}» · ${t.stage}: виконано 100%` });
+        await writeLog(c, { userId: u.id, orderId: o.id, folder: t.stage === 'Замір' ? 'zamir' : 'mont', text: `План · ${t.stage}: виконано 100%` });
       }
     }
   });

@@ -84,7 +84,7 @@ export function TaskModal({
         </div>
       )}
       <h2 id="task-title">
-        {task.itemName} — {task.stage}
+        {task.stage}
       </h2>
       {r.planned ? (
         <div className={`${r.late ? 'warnbox' : 'okbox'} num`}>

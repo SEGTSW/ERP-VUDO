@@ -61,13 +61,13 @@ export function Plan() {
   const groups = useMemo(() => {
     const m = new Map<number, PlanTaskFull[]>();
     for (const t of [...planned].sort((a, b) => a.sched.start.localeCompare(b.sched.start) || a.idx - b.idx)) {
-      const k = group === 'person' ? (t.assigneeId ?? 0) : t.itemId;
+      const k = group === 'person' ? (t.assigneeId ?? 0) : t.orderId;
       m.set(k, [...(m.get(k) ?? []), t]);
     }
     const g = [...m.entries()].map(([k, rows]) => ({ k, rows }));
     if (group === 'person') g.sort((a, b) => (a.rows[0]!.assigneeName ?? '').localeCompare(b.rows[0]!.assigneeName ?? '', 'uk'));
     else {
-      g.sort((a, b) => a.rows[0]!.orderNum.localeCompare(b.rows[0]!.orderNum) || a.rows[0]!.itemPos - b.rows[0]!.itemPos);
+      g.sort((a, b) => a.rows[0]!.orderNum.localeCompare(b.rows[0]!.orderNum));
       for (const x of g) x.rows.sort((a, b) => a.idx - b.idx);
     }
     return g;
@@ -118,7 +118,7 @@ export function Plan() {
     if (endI <= 0 || a >= NDAYS) return null;
     const w = Math.max(1, endI - a) * DW - 4;
     const pw = Math.min(100, (((t.days ?? 0) * DW * (t.progress / 100)) / w) * 100);
-    const tip = `${t.itemName} · ${t.stage}\n${t.assigneeName ?? '—'}\n${fmtDate(r.start)} – ${fmtDate(r.last)}, ${t.days} дн., виконано ${t.progress}%${r.late ? `\nПрострочено на ${r.lateBy} дн.` : ''}`;
+    const tip = `№${t.orderNum} · ${t.clientName} · ${t.stage}\n${t.assigneeName ?? '—'}\n${fmtDate(r.start)} – ${fmtDate(r.last)}, ${t.days} дн., виконано ${t.progress}%${r.late ? `\nПрострочено на ${r.lateBy} дн.` : ''}`;
     return (
       <button type="button" className={`gb ${r.done ? 'done' : r.late ? 'late' : ''}`} style={{ left: a * DW + 2, width: w }} title={tip} aria-label={tip} onClick={() => setOpen(t)}>
         <i style={{ width: `${r.done ? 100 : pw}%` }} />
@@ -130,7 +130,7 @@ export function Plan() {
 
   const itemHead = (rows: PlanTaskFull[]) => {
     const f = rows[0]!;
-    const miss = all.filter((t) => t.itemId === f.itemId && !t.sched.planned && t.progress < 100).sort((a, b) => a.idx - b.idx);
+    const miss = all.filter((t) => t.orderId === f.orderId && !t.sched.planned && t.progress < 100).sort((a, b) => a.idx - b.idx);
     const st = rows.map((t) => t.sched.start).sort()[0]!;
     const en = rows.map((t) => (t.sched.late ? addDays(today, 1) : t.sched.end!)).sort().at(-1)!;
     const a = Math.max(0, idx(st));
@@ -139,14 +139,16 @@ export function Plan() {
     const allDone = rows.every((t) => t.sched.done) && !miss.length;
     const inst = f.installDate ? idx(f.installDate) : -1;
     return (
-      <div className="g-row grp item" key={`h${f.itemId}`}>
+      <div className="g-row grp item" key={`h${f.orderId}`}>
         <div className="g-left" title="Відкрити замовлення" role="button" tabIndex={0} onClick={() => openOrder(f.orderId)} onKeyDown={(e) => e.key === 'Enter' && openOrder(f.orderId)}>
           <span className="wr">
             <span className="t1">
-              <b>{f.itemName}</b>
+              <b>
+                №{f.orderNum} · {f.clientName}
+              </b>
             </span>
             <span className="t2">
-              №{f.orderNum} · {f.clientName}
+              {[f.address, f.itemNames.join(', ')].filter(Boolean).join(' · ') || 'вироби ще не додано'}
               {f.installDate ? ` · монтаж ${ddmm(f.installDate)}` : ''}
             </span>
             {!!miss.length && (
@@ -202,9 +204,9 @@ export function Plan() {
           </div>
         ) : (
           <div className="g-left" role="button" tabIndex={0} onClick={() => setOpen(t)} onKeyDown={(e) => e.key === 'Enter' && setOpen(t)}>
-            <span className={`t1 ${cls(t)}`}>• {t.itemName}</span>
+            <span className={`t1 ${cls(t)}`}>• №{t.orderNum} · {t.clientName}</span>
             <span className="t2">
-              {t.stage} · №{t.orderNum} · {t.days} дн.{r.late && <b className="st-late"> · +{r.lateBy}</b>}
+              {t.stage} · {t.days} дн.{r.late && <b className="st-late"> · +{r.lateBy}</b>}
             </span>
           </div>
         )}
@@ -246,14 +248,14 @@ export function Plan() {
           <b>Вкажіть, скільки днів займуть ваші етапи ({mineUnpl.length}):</b>
           {mineUnpl.map((t) => (
             <button key={t.id} type="button" className="btn sm pri" onClick={() => setOpen(t)}>
-              №{t.orderNum} · {t.itemName} · {t.stage}
+              №{t.orderNum} · {t.clientName} · {t.stage}
             </button>
           ))}
         </div>
       )}
       <div className="bar">
         <select value={group} onChange={(e) => setGroup(e.target.value as 'item' | 'person')} aria-label="Групування">
-          <option value="item">Групувати: за виробами</option>
+          <option value="item">Групувати: за замовленнями</option>
           <option value="person">Групувати: за відповідальними</option>
         </select>
         <select value={who} onChange={(e) => setWho(e.target.value)} aria-label="Відповідальний">
@@ -303,7 +305,7 @@ export function Plan() {
             {unplanned.map((t) => (
               <div className="li" key={t.id} style={{ cursor: 'pointer' }} role="button" tabIndex={0} onClick={() => setOpen(t)} onKeyDown={(e) => e.key === 'Enter' && setOpen(t)}>
                 <div className="m">
-                  №{t.orderNum} · {t.itemName} · {t.stage}
+                  №{t.orderNum} · {t.clientName} · {t.stage}
                   <small>{t.assigneeName ?? '—'}</small>
                 </div>
                 <span className="btn sm">Вказати дні</span>
@@ -315,7 +317,7 @@ export function Plan() {
       <div className="gantt" ref={scroller}>
         <div className="g-in" style={{ width: W }}>
           <div className="g-head">
-            <div className="g-left">{group === 'person' ? 'Відповідальний / виріб' : 'Виріб / хто і скільки днів'}</div>
+            <div className="g-left">{group === 'person' ? 'Відповідальний / замовлення' : 'Замовлення / хто і скільки днів'}</div>
             <div className="g-days" style={{ width: NDAYS * DW }}>
               {mons}
               {days}
@@ -334,7 +336,7 @@ export function Plan() {
         </div>
       </div>
       <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-        Дні календарні. Етапи кожного виробу: Прорахунок → Замір → Конструктив → Збірка → Монтаж. Кожен етап починається, коли закінчується
+        Дні календарні. Етапи кожного замовлення (об'єкта): Прорахунок → Замір → Конструктив → Збірка → Монтаж. Кожен етап починається, коли закінчується
         попередній, якщо дату початку не вказано вручну. Якщо етап прострочено, наступні зсуваються від сьогодні.
       </p>
       {open && (

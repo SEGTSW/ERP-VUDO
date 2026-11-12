@@ -133,7 +133,7 @@ async function comments(db: Db, orderId: number) {
 
 function tasksView(o: OrderAgg) {
   const sch = taskSchedule(o);
-  return o.tasks.map((t) => ({ ...t, itemName: o.items.find((i) => i.id === t.itemId)?.name ?? '', sched: sch.get(t.id)! }));
+  return o.tasks.map((t) => ({ ...t, sched: sch.get(t.id)! }));
 }
 
 /** Останній день етапу «Монтаж» за планом працівників (підказка біля дати монтажу). */

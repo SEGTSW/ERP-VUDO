@@ -4,9 +4,12 @@ import { pool } from './db.js';
 import { logger } from './logger.js';
 import { migrate } from './migrate.js';
 import { purgeExpiredSessions } from './auth/sessions.js';
+import { ensureAllPlans } from './orders/plan.js';
 
 async function main() {
   await migrate(pool, (m) => logger.info(m));
+  const planned = await ensureAllPlans(pool);
+  if (planned) logger.info(`Створено план етапів для замовлень без плану: ${planned}`);
 
   const server = createApp().listen(config.port, () => {
     logger.info(`VUDO ERP API: http://localhost:${config.port} (${config.env})`);

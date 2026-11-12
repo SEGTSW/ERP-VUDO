@@ -20,7 +20,7 @@ import type pg from 'pg';
 import { badRequest } from '../errors.js';
 import { writeLog } from '../audit.js';
 import { compute, type OrderAgg } from './repo.js';
-import { completeStage, makeMissingPlans, syncMeasureTasks } from './plan.js';
+import { completeStage, makePlan, syncMeasureTasks } from './plan.js';
 
 /** Умова входу в статус; повертає текст, що зробити, або null. */
 export function precheck(o: OrderAgg, to: Status, s: Settings): string | null {
@@ -166,14 +166,8 @@ export async function moveStatus(
   };
   if (fields.some((f) => f.key === 'measureDate')) await syncMeasureTasks(c, o.id, v.measureDate!);
   if (contractNow) {
-    const made = await makeMissingPlans(c, people, today);
-    if (made.length) {
-      await writeLog(c, {
-        userId,
-        orderId: o.id,
-        folder: 'plan',
-        text: `Створено план етапів: ${made.join(', ')}. Відповідальні мають вказати кількість днів.`,
-      });
+    if (await makePlan(c, people, today)) {
+      await writeLog(c, { userId, orderId: o.id, folder: 'plan', text: 'Створено план етапів. Відповідальні мають вказати кількість днів.' });
     }
   }
   for (const cs of crossed) {

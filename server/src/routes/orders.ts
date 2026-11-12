@@ -195,6 +195,8 @@ ordersRouter.post('/orders', requireOffice, async (req, res) => {
       [num.rows[0]!.num, clientId, client.addresses[0] ?? null, b.managerId, b.source ?? client.source, designerId, b.comment || null, u.id],
     );
     const o = r.rows[0]!;
+    // План робіт — один на замовлення, створюється одразу зі зверненням
+    await makePlan(c, { id: o.id, status: 'Звернення', managerId: b.managerId, measurerId: null, constructorId: null, installerIds: [], measureDate: null });
     await writeLog(c, {
       userId: u.id,
       orderId: o.id,
@@ -404,14 +406,13 @@ ordersRouter.post('/orders/:id/items', requireOffice, async (req, res) => {
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
       [id, b.name, b.type, b.description, b.pre, b.designerPct, s.markupPct, u.id],
     );
-    await makePlan(c, o, r.rows[0]!.id);
     const price = compute((await fetchOrder(c, id))!, s).items.get(r.rows[0]!.id)!.price;
     await writeLog(c, {
       userId: u.id,
       orderId: id,
       folder: 'fin',
       finScope: 'pay',
-      text: `Додано виріб «${b.name}», ${money(price)}. Створено план: Прорахунок → Замір → Конструктив → Збірка → Монтаж`,
+      text: `Додано виріб «${b.name}», ${money(price)}`,
     });
     await logPriceAfterContract(c, o, s, before, u.id);
   });
