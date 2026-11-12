@@ -49,8 +49,8 @@ export function Plan() {
       (!who || String(t.assigneeId) === who) &&
       (!orderFilter || String(t.orderId) === orderFilter) &&
       (!stage || t.stage === stage) &&
-      // Виконані ховаються; замір на сьогодні чи пізніше видно завжди — це факт для всіх
-      (showDone || !t.sched.done || (t.stage === 'Замір' && t.sched.start >= today)),
+      // Усі етапи (і виконані) видно, доки замовлення не здано; здані — лише з галочкою
+      (showDone || t.orderStatus !== 'Закрито'),
   );
   const planned = filtered.filter((t) => t.sched.planned);
   const unplanned = filtered.filter((t) => !t.sched.planned && t.progress < 100);
@@ -290,7 +290,7 @@ export function Plan() {
           ))}
         </select>
         <label className="chk">
-          <input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} /> Показувати виконані
+          <input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} /> Показувати здані замовлення
         </label>
         <span className="grow" />
         {!!unplanned.length && (

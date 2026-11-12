@@ -25,6 +25,7 @@ planRouter.get('/plan', requireSection('plan'), async (_req, res) => {
       itemNames: o.items.map((i) => i.name),
       assigneeRoles: t.assigneeId ? (rolesOf.get(t.assigneeId) ?? []) : [],
       orderNum: o.num,
+      orderStatus: o.status,
       clientName: o.client.name,
       installDate: o.installDate,
       sched: sch.get(t.id)!,

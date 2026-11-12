@@ -262,6 +262,7 @@ export interface PlanTaskFull extends PlanTask {
   itemNames: string[];
   assigneeRoles: Role[];
   orderNum: string;
+  orderStatus: Status;
   clientName: string;
   installDate: string | null;
 }

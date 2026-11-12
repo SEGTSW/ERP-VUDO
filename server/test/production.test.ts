@@ -43,6 +43,7 @@ describe('планування (розділ 8)', () => {
     // Конструктив починається одразу після Прорахунку (2 дні від сьогодні); Замір без дати не займає днів
     expect(z.sched).toMatchObject({ planned: true, start: addDays(today, 2), last: addDays(today, 4) });
     expect(z.orderNum).toBe(o.num);
+    expect(z.orderStatus).toBe('Звернення');
     expect(JSON.stringify(plan)).not.toMatch(/price|грн/);
     expect((await logTexts()).at(-1)).toBe('План · Конструктив: днів — → 3, виконано 50%');
   });
