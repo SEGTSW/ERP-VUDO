@@ -128,6 +128,8 @@ describe('Мій день (8А.3)', () => {
       constructorId: null, installerIds: [ids.oleh], measureDate: null, installDate: addDays(today, 3), readyDate: null, delivery: 0, discount: 0,
       discountType: 'грн', comment: 'Поверх 5',
     });
+    // монтажники приходять числами — інакше поле в картці «губить» вибір, а виїзд не знаходиться
+    expect((await m.get(`/api/orders/${o.id}`)).body.installerIds).toEqual([ids.oleh]);
     const ol = await loginAs('oleh');
     let day = (await ol.get('/api/myday')).body;
     expect(day.visits).toHaveLength(0);

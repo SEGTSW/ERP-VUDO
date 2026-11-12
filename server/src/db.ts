@@ -6,6 +6,8 @@ import { logger } from './logger.js';
 pg.types.setTypeParser(pg.types.builtins.INT8, (v) => Number(v));
 // numeric (гроші) — теж number; суми зберігаються з 2 знаками після коми.
 pg.types.setTypeParser(pg.types.builtins.NUMERIC, (v) => Number(v));
+// bigint[] (installer_ids тощо) — масив чисел, а не рядків (інакше '3' !== 3 у порівняннях).
+pg.types.setTypeParser(1016 as never, (v: string) => (v === '{}' ? [] : v.slice(1, -1).split(',').map(Number)));
 // date — рядком РРРР-ММ-ДД, без перетворення часового поясу.
 pg.types.setTypeParser(pg.types.builtins.DATE, (v) => v);
 
