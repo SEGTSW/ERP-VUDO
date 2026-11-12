@@ -9,6 +9,7 @@ import { ConfirmButton, Modal, WarnBox } from '../ui/common';
 import { SubTabs } from '../ui/bits';
 import { useToast } from '../ui/toast';
 import { PnlTab } from '../finance/PnlTab';
+import { FixedTab } from '../finance/FixedTab';
 import { DebtsTab, DesignersTab, PaymentsTab, SalariesTab } from '../finance/MoneyTabs';
 
 type Tab = 'cash' | 'pnl' | 'pay' | 'debt' | 'des' | 'sal' | 'fixed' | 'arts';
@@ -51,12 +52,7 @@ export function Finance() {
       {tab === 'debt' && <DebtsTab />}
       {tab === 'des' && <DesignersTab />}
       {tab === 'sal' && <SalariesTab />}
-      {tab === 'fixed' && (
-        <div className="stub">
-          <b>Вкладка в розробці</b>
-          <span>З'явиться в наступній частині етапу «Фінанси».</span>
-        </div>
-      )}
+      {tab === 'fixed' && <FixedTab />}
     </>
   );
 }

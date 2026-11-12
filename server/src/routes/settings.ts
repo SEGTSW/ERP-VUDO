@@ -5,6 +5,7 @@ import { forbidden } from '../errors.js';
 import { me, requireOffice } from '../auth/middleware.js';
 import { lv, writeLog, type LogEntryInput } from '../audit.js';
 import { getSettings, saveSettings, settingsSchema } from '../settings.js';
+import { opexInfo } from '../finance/opex.js';
 
 /** Поля, які бачить і змінює лише власник (фінансова звітність). */
 const OWNER_ONLY = ['opexPct', 'opexMode', 'mgrPct'] as const;
@@ -22,7 +23,10 @@ export const settingsRouter = Router();
 settingsRouter.use('/settings', requireOffice);
 
 settingsRouter.get('/settings', async (req, res) => {
-  res.json(forRole(await getSettings(pool), isOwner(me(req))));
+  const s = await getSettings(pool);
+  const owner = isOwner(me(req));
+  // Власнику — ще підказки «зараз авто: N%» і «за фактом 3 міс.: N%»
+  res.json(owner ? { ...s, opexInfo: await opexInfo(pool, s) } : forRole(s, false));
 });
 
 settingsRouter.patch('/settings', async (req, res) => {

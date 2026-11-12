@@ -49,7 +49,16 @@ export function useRefreshFinance() {
  * Вікно операції обліку: «Нова операція» / «Витрата на замовлення» (стаття і замовлення зафіксовані) / «Редагувати операцію».
  * Сума без мінуса — знак визначає стаття.
  */
-export function CashModal({ edit, lockOrderId, onClose }: { edit?: CashRow; lockOrderId?: number; onClose: () => void }) {
+export interface CashPrefill {
+  cat: string;
+  obj: string;
+  amount: number;
+  note: string;
+  counterparty: string;
+  fixedId: number;
+}
+
+export function CashModal({ edit, lockOrderId, prefill, onClose }: { edit?: CashRow; lockOrderId?: number; prefill?: CashPrefill; onClose: () => void }) {
   const toast = useToast();
   const refresh = useRefreshFinance();
   const arts = (useArticles().data ?? []).filter((a) => !a.hidden);
@@ -57,13 +66,13 @@ export function CashModal({ edit, lockOrderId, onClose }: { edit?: CashRow; lock
   const [v, setV] = useState({
     date: edit?.date ?? kyivToday(),
     type: edit?.type ?? 'Витрата',
-    cat: edit?.cat ?? (lockOrderId ? 'Замовлення' : ''),
-    obj: edit && !edit.orderId ? edit.obj : '',
+    cat: edit?.cat ?? prefill?.cat ?? (lockOrderId ? 'Замовлення' : ''),
+    obj: edit && !edit.orderId ? edit.obj : (prefill?.obj ?? ''),
     orderId: edit?.orderId ?? lockOrderId ?? null,
-    counterparty: edit?.counterparty ?? '',
-    note: edit?.note ?? '',
+    counterparty: edit?.counterparty ?? prefill?.counterparty ?? '',
+    note: edit?.note ?? prefill?.note ?? '',
     account: edit?.account ?? 'Карта',
-    amount: edit ? String(Math.abs(edit.sum)) : '',
+    amount: edit ? String(Math.abs(edit.sum)) : prefill ? String(prefill.amount) : '',
   });
   const [err, setErr] = useState('');
   const ofType = arts.filter((a) => a.type === v.type);
@@ -84,6 +93,7 @@ export function CashModal({ edit, lockOrderId, onClose }: { edit?: CashRow; lock
         note: v.note,
         account: v.account,
         amount: Number(v.amount.replace(',', '.').replace(/\s/g, '')),
+        ...(prefill && !edit ? { fixedId: prefill.fixedId } : {}),
       };
       return edit ? api.patch(`/finance/cash/${edit.opId}`, body) : api.post('/finance/cash', body);
     },

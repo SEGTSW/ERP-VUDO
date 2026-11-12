@@ -13,6 +13,8 @@ import { diffLine, writeLog } from '../audit.js';
 import { getSettings } from '../settings.js';
 import { balances, cashRows, loadArticles, orderFacts } from '../finance/cash.js';
 import { fetchOrder, ownerFigures, compute } from '../orders/repo.js';
+import { opexInfo } from '../finance/opex.js';
+import { FIXED_PERIODS, perMonth, planSigned, type PnlLine } from '@vudo/shared';
 
 export const financeRouter = Router();
 financeRouter.use('/finance', requireOwner);
@@ -69,6 +71,8 @@ const opSchema = z.object({
   account: z.enum(ACCOUNTS),
   /** Без мінуса — знак визначає стаття */
   amount: z.number().positive('Вкажіть суму більше 0.').max(1_000_000_000),
+  /** «Сплатити» з постійних витрат — посилання на пункт */
+  fixedId: z.number().int().positive().nullable().default(null),
 });
 
 interface OpRow {
@@ -113,8 +117,8 @@ financeRouter.post('/finance/cash', async (req, res) => {
   await tx(async (c) => {
     const v = await normalize(c, b);
     await c.query(
-      `INSERT INTO cash_ops (date, type, cat, obj, order_id, counterparty, note, account, sum, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-      [v.date, v.type, v.cat, v.obj, v.orderId, v.counterparty, v.note, v.account, v.sum, u.id],
+      `INSERT INTO cash_ops (date, type, cat, obj, order_id, counterparty, note, account, sum, fixed_id, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [v.date, v.type, v.cat, v.obj, v.orderId, v.counterparty, v.note, v.account, v.sum, v.fixedId, u.id],
     );
     await writeLog(c, {
       userId: u.id,
@@ -275,7 +279,9 @@ financeRouter.get('/finance/orders/:id/costs', async (req, res) => {
   const id = Number(req.params.id);
   const o = await fetchOrder(pool, id);
   if (!o) throw notFound('Замовлення не знайдено.');
-  const s = await getSettings(pool);
+  const s0 = await getSettings(pool);
+  const info = await opexInfo(pool, s0);
+  const s = { ...s0, opexPct: info.pct };
   const { calc } = compute(o, s);
   const f = await orderFacts(pool, id);
   const figures = ownerFigures(o, calc, s, f);
@@ -378,4 +384,122 @@ financeRouter.put('/finance/pnl/plan', async (req, res) => {
     await writeLog(c, { userId: u.id, folder: 'fin', finScope: 'report', text: `P&L план ${b.month} · ${lineLabel(b.line)}: ${v(old)} → ${v(b.amount)}` });
   });
   res.json({ ok: true });
+});
+
+/* ---------- 10.7 Постійні витрати ---------- */
+
+financeRouter.get('/finance/fixed', async (_req, res) => {
+  const today = kyivToday();
+  const month = today.slice(0, 7);
+  const arts = await loadArticles(pool);
+  const items = await pool.query<{ id: number; name: string; cat: string; obj: string; counterparty: string; amount: number; period: string; active: boolean }>(
+    'SELECT id, name, cat, obj, counterparty, amount, period, active FROM fixed_costs ORDER BY pos, id',
+  );
+  // «Сплачено за місяць» = Σ операцій обліку з посиланням на пункт у поточному місяці
+  const paid = await pool.query<{ fixedId: number; s: number }>(
+    `SELECT fixed_id AS "fixedId", -sum(sum)::numeric AS s FROM cash_ops WHERE fixed_id IS NOT NULL AND to_char(date, 'YYYY-MM') = $1 GROUP BY fixed_id`,
+    [month],
+  );
+  const info = await opexInfo(pool, await getSettings(pool));
+  const rows = items.rows.map((x) => ({
+    ...x,
+    perMonth: Math.round(perMonth(x.amount, x.period) * 100) / 100,
+    paid: paid.rows.find((p) => p.fixedId === x.id)?.s ?? 0,
+    line: findArticle(arts, 'Витрата', x.cat, x.obj)?.line ?? 'none',
+  }));
+  const act = rows.filter((x) => x.active);
+  res.json({
+    month,
+    rows,
+    total: info.fixedTotal,
+    paid: act.reduce((t, x) => t + x.paid, 0),
+    due: act.filter((x) => x.period === 'month' || x.period === 'week').reduce((t, x) => t + Math.max(0, x.perMonth - x.paid), 0),
+    info,
+    cats: [...new Set(arts.filter((a) => !a.hidden && a.type === 'Витрата' && !a.toOrder).map((a) => a.cat))],
+  });
+});
+
+const fixedSchema = z.object({
+  name: z.string().trim().min(1, 'Вкажіть назву.').max(200),
+  cat: z.string().trim().max(100),
+  obj: z.string().trim().max(200),
+  counterparty: z.string().trim().max(200),
+  amount: z.number().min(0).max(1_000_000_000),
+  period: z.enum(FIXED_PERIODS.map((p) => p[0]) as [string, ...string[]]),
+  active: z.boolean(),
+});
+
+financeRouter.post('/finance/fixed', async (req, res) => {
+  const b = fixedSchema.partial({ obj: true, counterparty: true, active: true }).parse(req.body);
+  const u = me(req);
+  await tx(async (c) => {
+    await c.query(
+      `INSERT INTO fixed_costs (name, cat, obj, counterparty, amount, period, pos) VALUES ($1,$2,$3,$4,$5,$6, (SELECT coalesce(max(pos), 0) + 1 FROM fixed_costs))`,
+      [b.name, b.cat, b.obj ?? '', b.counterparty ?? '', b.amount, b.period],
+    );
+    await writeLog(c, { userId: u.id, folder: 'fin', finScope: 'report', text: `Постійні витрати: додано «${b.name}», ${money(b.amount)} (${FIXED_PERIODS.find((p) => p[0] === b.period)![1]})` });
+  });
+  res.status(201).json({ ok: true });
+});
+
+financeRouter.patch('/finance/fixed/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  const b = fixedSchema.partial().parse(req.body);
+  const u = me(req);
+  await tx(async (c) => {
+    const r = await c.query<{ name: string; cat: string; obj: string; counterparty: string; amount: number; period: string; active: boolean }>(
+      'SELECT name, cat, obj, counterparty, amount, period, active FROM fixed_costs WHERE id = $1 FOR UPDATE',
+      [id],
+    );
+    const x = r.rows[0];
+    if (!x) throw notFound('Пункт не знайдено.');
+    const n = { ...x, ...b };
+    await c.query('UPDATE fixed_costs SET name=$2, cat=$3, obj=$4, counterparty=$5, amount=$6, period=$7, active=$8 WHERE id = $1', [
+      id, n.name, n.cat, n.obj, n.counterparty, n.amount, n.period, n.active,
+    ]);
+    const pl = (p: string) => FIXED_PERIODS.find((q) => q[0] === p)?.[1] ?? p;
+    const ch = [
+      diffLine('назва', x.name, n.name),
+      diffLine('підстаття', x.cat, n.cat),
+      diffLine("об'єкт", x.obj, n.obj),
+      diffLine('сума', money(x.amount), money(n.amount)),
+      diffLine('періодичність', pl(x.period), pl(n.period)),
+      x.active !== n.active ? (n.active ? 'увімкнено' : 'вимкнено') : null,
+    ].filter(Boolean);
+    if (ch.length) await writeLog(c, { userId: u.id, folder: 'fin', finScope: 'report', text: `Постійні витрати «${x.name}»: ${ch.join('; ')}` });
+  });
+  res.json({ ok: true });
+});
+
+/** «Перенести в план P&L на 12 міс.»: суми на місяць за рядками P&L від поточного місяця (перезаписує ці рядки плану). */
+financeRouter.post('/finance/fixed/to-plan', async (req, res) => {
+  const u = me(req);
+  const arts = await loadArticles(pool);
+  const items = await pool.query<{ cat: string; obj: string; amount: number; period: string }>('SELECT cat, obj, amount, period FROM fixed_costs WHERE active');
+  const byLine = new Map<string, number>();
+  for (const x of items.rows) {
+    const line = findArticle(arts, 'Витрата', x.cat, x.obj)?.line ?? 'none';
+    if (line === 'none') continue;
+    byLine.set(line, (byLine.get(line) ?? 0) + perMonth(x.amount, x.period));
+  }
+  const today = kyivToday();
+  const months = Array.from({ length: 12 }, (_, k) => {
+    const d = new Date(Date.UTC(Number(today.slice(0, 4)), Number(today.slice(5, 7)) - 1 + k, 1));
+    return d.toISOString().slice(0, 7);
+  });
+  await tx(async (c) => {
+    for (const m of months) {
+      for (const [line, v] of byLine) {
+        // План витрат вводиться без мінуса (знак визначає рядок)
+        const amount = Math.round(Math.abs(planSigned(line as PnlLine, v)));
+        await c.query(
+          `INSERT INTO pnl_plan (month, line, amount, updated_by) VALUES ($1, $2, $3, $4)
+           ON CONFLICT (month, line) DO UPDATE SET amount = EXCLUDED.amount, updated_at = now(), updated_by = EXCLUDED.updated_by`,
+          [m, line, amount, u.id],
+        );
+      }
+    }
+    await writeLog(c, { userId: u.id, folder: 'fin', finScope: 'report', text: `P&L план: перенесено постійні витрати на 12 міс. (${months[0]} – ${months[11]})` });
+  });
+  res.json({ ok: true, months: months.length, lines: byLine.size });
 });

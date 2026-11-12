@@ -165,3 +165,40 @@ describe('оплати, борги, дизайнерам, нарахування
     expect(r.total).toBe(450);
   });
 });
+
+describe('постійні витрати (10.7, формула 13)', () => {
+  it('сума на місяць за періодичністю; «Сплатити» рахується за місяць; авто-частка від плану доходу', async () => {
+    const { a, o } = await setup();
+    let f = (await a.get('/api/finance/fixed')).body;
+    // стартовий список: 165 900 + 9 000 / 3 (квартал) = 168 900... перевіряємо формулу на одному пункті
+    const tool = f.rows.find((x: { name: string }) => x.name === 'Обслуговування інструменту');
+    expect(tool).toMatchObject({ period: 'quarter', perMonth: 3000 });
+    const rent = f.rows.find((x: { name: string }) => x.name === 'Оренда цеху');
+    await a.post('/api/finance/cash', { date: today, type: 'Витрата', cat: rent.cat, obj: rent.obj, orderId: null, counterparty: 'Оренда', note: rent.name, account: 'Карта', amount: 18000, fixedId: rent.id });
+    f = (await a.get('/api/finance/fixed')).body;
+    expect(f.rows.find((x: { id: number }) => x.id === rent.id).paid).toBe(18000);
+    // вимкнений пункт не рахується
+    const before = f.total;
+    await a.patch(`/api/finance/fixed/${tool.id}`, { active: false });
+    f = (await a.get('/api/finance/fixed')).body;
+    expect(f.total).toBe(before - 3000);
+    // авто-частка: постійні на місяць / план доходу поточного місяця
+    await a.agent.put('/api/finance/pnl/plan').set('X-VUDO', '1').send({ month: today.slice(0, 7), line: 'income', amount: f.total * 4 });
+    f = (await a.get('/api/finance/fixed')).body;
+    expect(f.info).toMatchObject({ autoPct: 25, pct: 25, base: { src: 'план доходу на цей місяць' } });
+    // замовлення без ручних постійних — бере 25 %: 15 000 × 25 % = 3 750
+    expect((await a.get(`/api/orders/${o.id}`)).body.owner.opex).toBe(3750);
+    // режим «вручну» — % з налаштувань
+    await a.patch('/api/settings', { opexMode: 'fixed' });
+    expect((await a.get(`/api/orders/${o.id}`)).body.owner.opex).toBe(2250);
+  });
+
+  it('«Перенести в план P&L на 12 міс.» — суми на місяць за рядками', async () => {
+    const { a } = await setup();
+    expect((await a.post('/api/finance/fixed/to-plan')).body).toMatchObject({ ok: true, months: 12 });
+    const p = (await a.get(`/api/finance/pnl?year=${today.slice(0, 4)}`)).body;
+    const m = today.slice(0, 7);
+    // ФОП 95 000 (Фіксована зарплата), маркетинг 6 000
+    expect(p.plan[m]).toMatchObject({ payroll: 95000, marketing: 6000 });
+  });
+});

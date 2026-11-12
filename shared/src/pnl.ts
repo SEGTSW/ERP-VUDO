@@ -47,3 +47,28 @@ export function pnlDerived(s: LineSums) {
     opMargin: g('income') ? (result / g('income')) * 100 : null,
   };
 }
+
+/* ---------- 10.7 Постійні витрати, формула 13 ---------- */
+
+export const FIXED_PERIODS = [
+  ['month', 'щомісяця', 1],
+  ['week', 'щотижня', 52 / 12],
+  ['quarter', 'раз на квартал', 1 / 3],
+  ['year', 'раз на рік', 1 / 12],
+] as const;
+export type FixedPeriod = (typeof FIXED_PERIODS)[number][0];
+
+/** Сума на місяць: щомісячні × 1, щотижневі × 52/12, квартальні / 3, річні / 12. */
+export function perMonth(amount: number, period: string): number {
+  const k = FIXED_PERIODS.find((p) => p[0] === period)?.[2] ?? 1;
+  return (Number(amount) || 0) * k;
+}
+
+/**
+ * (13) Частка постійних витрат на замовлення (авто) = Σ постійних на місяць / база × 100, один знак після коми.
+ * База — план доходу поточного місяця; немає плану — середній фактичний дохід останніх 3 місяців з доходом.
+ */
+export function autoOpexPct(fixedPerMonth: number, base: number | null): number | null {
+  if (!base || base <= 0) return null;
+  return Math.round((fixedPerMonth / base) * 1000) / 10;
+}
