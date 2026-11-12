@@ -25,6 +25,11 @@ export function Layout({ children }: { children: ReactNode }) {
     queryFn: () => api.get<{ total: number }>('/log/unread'),
     refetchInterval: 60_000,
   });
+  const kbUnread = useQuery({
+    queryKey: ['kb-unread'],
+    queryFn: () => api.get<{ total: number }>('/kb-unread'),
+    refetchInterval: 300_000,
+  });
 
   return (
     <div className="app">
@@ -44,6 +49,11 @@ export function Layout({ children }: { children: ReactNode }) {
               <NavIcon section={n.key} />
               <span className="lbl">{n.label}</span>
               {n.key === 'notes' && !!unread.data?.total && <span className="badge">{unread.data.total}</span>}
+              {n.key === 'kb' && !!kbUnread.data?.total && (
+                <span className="badge" title="нових матеріалів">
+                  {kbUnread.data.total}
+                </span>
+              )}
             </NavLink>
           ))}
         </nav>

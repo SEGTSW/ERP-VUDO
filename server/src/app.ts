@@ -23,6 +23,7 @@ import { financeRouter } from './routes/finance.js';
 import { moneyRouter } from './routes/money.js';
 import { statsRouter } from './routes/stats.js';
 import { timeRouter } from './routes/time.js';
+import { kbRouter } from './routes/kb.js';
 
 function clientDist(): string | null {
   const here = path.dirname(fileURLToPath(import.meta.url));
@@ -87,6 +88,7 @@ export function createApp() {
   api.use(moneyRouter);
   api.use(statsRouter);
   api.use(timeRouter);
+  api.use(kbRouter);
   api.use(() => {
     throw new HttpError(404, 'Невідомий запит.');
   });

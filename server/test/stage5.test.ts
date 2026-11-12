@@ -34,3 +34,32 @@ describe('табель (12В)', () => {
     expect((await (await loginAs('roman')).get('/api/time')).status).toBe(403);
   });
 });
+
+describe('база знань (12Б)', () => {
+  it('стартові чернетки; «лише офіс» не бачать виконавці; ознайомлення і лічильник; повторне ознайомлення', async () => {
+    await makeUser('iryna', ['Менеджер'], { name: 'Ірина' });
+    await makeUser('roman', ['Цех'], { name: 'Роман' });
+    const m = await loginAs('iryna');
+    const r = await loginAs('roman');
+    await m.post('/api/kb', { title: 'Місія', cat: 'Компанія', body: '…', vis: 'all', pinned: true, draft: true });
+    expect((await r.get('/api/kb')).body.map((a: { title: string }) => a.title)).toEqual(['Місія']);
+    expect((await r.get('/api/kb-unread')).body.total).toBe(0); // чернетки не потребують ознайомлення
+    const pub = (await m.post('/api/kb', { title: 'Стандарти спілкування', cat: 'Клієнт', body: '# Стандарти\n- **ввічливо**', vis: 'all', pinned: false, draft: false })).body.id;
+    const off = (await m.post('/api/kb', { title: 'Ціноутворення', cat: 'Регламенти', body: 'тільки офіс', vis: 'office', pinned: false, draft: false })).body.id;
+    expect((await r.get('/api/kb-unread')).body.total).toBe(1);
+    expect((await r.get(`/api/kb/${off}`)).status).toBe(404);
+    expect((await r.post('/api/kb', { title: 'x', cat: 'Клієнт', body: '', vis: 'all', pinned: false, draft: false })).status).toBe(403);
+    await r.post(`/api/kb/${pub}/read`);
+    expect((await r.get('/api/kb-unread')).body.total).toBe(0);
+    const det = (await m.get(`/api/kb/${pub}`)).body;
+    expect(det.readers.find((x: { name: string }) => x.name === 'Роман').readAt).toBeTruthy();
+    await m.patch(`/api/kb/${pub}`, { title: 'Стандарти спілкування', cat: 'Клієнт', body: 'нове', vis: 'all', pinned: false, draft: false, rereq: true });
+    expect((await r.get('/api/kb-unread')).body.total).toBe(1);
+    expect(await logTexts()).toContain('База знань: оновлено «Стандарти спілкування» — попрошено ознайомитись знову');
+    const up = await m.agent.post(`/api/kb/${pub}/files`).set('X-VUDO', '1').attach('files', Buffer.from('%PDF'), 'стандарти.pdf');
+    expect(up.status).toBe(201);
+    const fid = (await r.get(`/api/kb/${pub}`)).body.files[0].id;
+    expect((await r.get(`/api/kb-files/${fid}`)).status).toBe(200);
+    expect((await m.agent.delete(`/api/kb/${off}`).set('X-VUDO', '1')).status).toBe(200);
+  });
+});
