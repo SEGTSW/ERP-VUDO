@@ -119,3 +119,49 @@ describe('P&L (10.2)', () => {
     expect((await mgr.get('/api/finance/pnl')).status).toBe(403);
   });
 });
+
+describe('оплати, борги, дизайнерам, нарахування (10.3–10.6)', () => {
+  it('оплати і борги бачить менеджер; борг — лише після договору', async () => {
+    const { a, o } = await setup();
+    const m = await loginAs('iryna');
+    const p = (await m.get('/api/money/payments')).body;
+    expect(p).toMatchObject({ total: 6000, count: 1, byMethod: { готівка: 6000 } });
+    expect((await m.get('/api/money/debts')).body.rows).toHaveLength(0); // ще без договору
+    await a.post(`/api/orders/${o.id}/status`, { to: 'Договір / аванс отримано', mode: 'jump' });
+    const d = (await m.get('/api/money/debts')).body;
+    expect(d.rows[0]).toMatchObject({ num: o.num, price: 15000, paid: 6000, debt: 9000, afterInstall: false });
+    expect(d.total).toBe(9000);
+    expect((await m.get('/api/money/designers')).status).toBe(403);
+    expect((await m.get('/api/money/salaries')).status).toBe(403);
+  });
+
+  it('бонус дизайнеру нараховується з договором; виплата — в обліку як «Співпраці»', async () => {
+    const { a, ids } = await setup();
+    const des = (await a.post('/api/clients', { name: 'Оксана', type: 'дизайнер-партнер', company: 'Простір', bonusPct: 10 })).body;
+    const o = (await a.post('/api/orders', { phone: '+380501112233', name: 'Ігор', source: 'дизайнер', designerId: des.id, managerId: ids.iryna })).body;
+    await a.post(`/api/orders/${o.id}/items`, { name: 'Кухня', type: 'кухня', description: '', pre: { korpus: 20000 }, designerPct: null });
+    let r = (await a.get('/api/money/designers')).body;
+    expect(r.rows[0]).toMatchObject({ label: 'Оксана · Простір', accrued: 0, expected: 3000, contracts: 0 });
+    await a.post(`/api/orders/${o.id}/payments`, { sum: 15000, type: 'аванс', method: 'картка', date: today });
+    await a.post(`/api/orders/${o.id}/status`, { to: 'Договір / аванс отримано', mode: 'jump' });
+    r = (await a.get('/api/money/designers')).body;
+    expect(r.rows[0]).toMatchObject({ accrued: 3000, paid: 0, owe: 3000, contracts: 1, sales: 30000 });
+    await a.post(`/api/money/designers/${des.id}/payouts`, { sum: 3000, method: 'рахунок', date: today });
+    r = (await a.get('/api/money/designers')).body;
+    expect(r.rows[0]).toMatchObject({ paid: 3000, owe: 0 });
+    expect(r.paidThisMonth).toBe(3000);
+    const cash = (await a.get('/api/finance/cash')).body;
+    expect(cash.rows.find((x: { derived: string | null }) => x.derived === 'дизайнер')).toMatchObject({ sum: -3000, cat: 'Співпраці', line: 'collab', counterparty: 'Оксана · Простір' });
+  });
+
+  it('нарахування менеджерам: сума договорів × ставка', async () => {
+    const { a, o } = await setup();
+    await a.post(`/api/orders/${o.id}/status`, { to: 'Договір / аванс отримано', mode: 'jump' });
+    let r = (await a.get('/api/money/salaries')).body;
+    expect(r.rows.find((x: { name: string }) => x.name === 'Ірина')).toMatchObject({ contracts: 1, sales: 15000, pay: null });
+    await a.patch('/api/settings', { mgrPct: 3 });
+    r = (await a.get('/api/money/salaries')).body;
+    expect(r.rows.find((x: { name: string }) => x.name === 'Ірина').pay).toBe(450);
+    expect(r.total).toBe(450);
+  });
+});

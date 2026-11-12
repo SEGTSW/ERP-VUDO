@@ -9,6 +9,7 @@ import { ConfirmButton, Modal, WarnBox } from '../ui/common';
 import { SubTabs } from '../ui/bits';
 import { useToast } from '../ui/toast';
 import { PnlTab } from '../finance/PnlTab';
+import { DebtsTab, DesignersTab, PaymentsTab, SalariesTab } from '../finance/MoneyTabs';
 
 type Tab = 'cash' | 'pnl' | 'pay' | 'debt' | 'des' | 'sal' | 'fixed' | 'arts';
 const MONTHS = ['Січень', 'Лютий', 'Березень', 'Квітень', 'Травень', 'Червень', 'Липень', 'Серпень', 'Вересень', 'Жовтень', 'Листопад', 'Грудень'];
@@ -46,7 +47,11 @@ export function Finance() {
       {tab === 'cash' && <CashTab />}
       {tab === 'arts' && <ArtsTab />}
       {tab === 'pnl' && <PnlTab />}
-      {!['cash', 'arts', 'pnl'].includes(tab) && (
+      {tab === 'pay' && <PaymentsTab />}
+      {tab === 'debt' && <DebtsTab />}
+      {tab === 'des' && <DesignersTab />}
+      {tab === 'sal' && <SalariesTab />}
+      {tab === 'fixed' && (
         <div className="stub">
           <b>Вкладка в розробці</b>
           <span>З'явиться в наступній частині етапу «Фінанси».</span>

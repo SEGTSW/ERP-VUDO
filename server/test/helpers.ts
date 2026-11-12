@@ -11,7 +11,7 @@ export const PASS = 'password1';
 
 /** Очищає дані між тестами. */
 export async function resetDb() {
-  await pool.query(`TRUNCATE cash_ops, issues, stock_items, plan_tasks, order_comments, order_files, payments, items, audit_log, orders, clients,
+  await pool.query(`TRUNCATE designer_payouts, pnl_plan, cash_ops, issues, stock_items, plan_tasks, order_comments, order_files, payments, items, audit_log, orders, clients,
     log_reads, sessions, settings, users RESTART IDENTITY CASCADE`);
   await pool.query('ALTER SEQUENCE order_num_seq RESTART');
   resetLoginLimits();

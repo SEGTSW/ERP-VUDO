@@ -56,6 +56,12 @@ export async function cashRows(db: Db, opts: { orderId?: number; from?: string; 
               CASE WHEN p.type = 'повернення' THEN -p.sum ELSE p.sum END,
               'оплата', NULL, NULL, p.id
          FROM payments p JOIN orders o ON o.id = p.order_id JOIN clients cl ON cl.id = o.client_id
+       UNION ALL
+       SELECT 'd' || d.id, NULL, d.date, 'Витрата', 'Співпраці', 'Виплата', NULL,
+              dc.name || CASE WHEN coalesce(dc.company, '') <> '' THEN ' · ' || dc.company ELSE '' END,
+              'бонус дизайнеру' || CASE WHEN coalesce(d.comment, '') <> '' THEN ' · ' || d.comment ELSE '' END,
+              CASE WHEN d.method = 'готівка' THEN 'Готівка' ELSE 'Карта' END, -d.sum, 'дизайнер', NULL, NULL, d.id
+         FROM designer_payouts d JOIN clients dc ON dc.id = d.designer_id
      ) x
      WHERE ($1::bigint IS NULL OR x."orderId" = $1) AND ($2::date IS NULL OR x.date >= $2) AND ($3::date IS NULL OR x.date <= $3)
      ORDER BY x.date DESC, x.ord DESC`,
@@ -72,6 +78,8 @@ export async function balances(db: Db) {
        UNION ALL
        SELECT CASE WHEN method = 'готівка' THEN 'Готівка' ELSE 'Карта' END,
               CASE WHEN type = 'повернення' THEN -sum ELSE sum END FROM payments
+       UNION ALL
+       SELECT CASE WHEN method = 'готівка' THEN 'Готівка' ELSE 'Карта' END, -sum FROM designer_payouts
      ) x GROUP BY account`,
   );
   const card = r.rows.find((x) => x.account === 'Карта')?.s ?? 0;
