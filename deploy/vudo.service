@@ -1,0 +1,28 @@
+[Unit]
+Description=VUDO ERP
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=vudo
+Group=vudo
+WorkingDirectory=/opt/vudo
+EnvironmentFile=/opt/vudo/.env
+# Міграції БД застосовуються автоматично при старті
+ExecStart=/usr/bin/node server/dist/index.js
+Restart=always
+RestartSec=3
+# Обмеження прав процесу
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/vudo
+ProtectKernelTunables=true
+ProtectControlGroups=true
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

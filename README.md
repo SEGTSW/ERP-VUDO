@@ -35,6 +35,9 @@ npm run typecheck # перевірка типів усіх пакетів
 
 ## Робоча система
 
+Покрокова інструкція для Hetzner — [`deploy/README.md`](deploy/README.md).
+
+
 ```bash
 npm ci && npm run build
 NODE_ENV=production npm run create-admin -- --login owner --name "Ім'я Прізвище"   # перший власник
