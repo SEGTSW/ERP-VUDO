@@ -10,6 +10,7 @@ await build({
     index: 'src/index.ts',
     migrate: 'src/scripts/migrate.ts',
     'create-admin': 'src/scripts/createAdmin.ts',
+    'import-finance': 'src/scripts/importFinance.ts',
   },
   outdir: 'dist',
   bundle: true,

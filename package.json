@@ -18,7 +18,8 @@
     "migrate": "npm run migrate -w server",
     "create-admin": "npm run create-admin -w server",
     "test": "npm run test -w shared && npm run test -w server",
-    "typecheck": "npm run typecheck -w shared && npm run typecheck -w server && npm run typecheck -w client"
+    "typecheck": "npm run typecheck -w shared && npm run typecheck -w server && npm run typecheck -w client",
+    "import-finance": "npm run import-finance -w server --"
   },
   "devDependencies": {
     "concurrently": "^9.0.0",

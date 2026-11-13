@@ -2,7 +2,8 @@
  * Фінанси власника (ТЗ 10.1 облік, 10.8 статейник, 5.4 витрати замовлення).
  * Усе тут — лише власник (роль Адмін); менеджеру сервер ці дані не віддає навіть за прямим посиланням.
  */
-import { Router } from 'express';
+import { Router, type Request, type Response } from 'express';
+import multer from 'multer';
 import { z } from 'zod';
 import type pg from 'pg';
 import { ACCOUNTS, ART_TYPES, PNL_LINES, findArticle, fmtDate, kyivToday, lineLabel, money, typeSign } from '@vudo/shared';
@@ -14,7 +15,8 @@ import { getSettings } from '../settings.js';
 import { balances, cashRows, loadArticles, orderFacts } from '../finance/cash.js';
 import { fetchOrder, ownerFigures, compute } from '../orders/repo.js';
 import { opexInfo } from '../finance/opex.js';
-import { FIXED_PERIODS, perMonth, planSigned, type PnlLine } from '@vudo/shared';
+import { importCash, loadWorkbook, parseCashSheet, parsePnlSheet } from '../finance/import.js';
+import { FIXED_PERIODS, LINE_KIND, perMonth, planSigned, type PnlLine } from '@vudo/shared';
 
 export const financeRouter = Router();
 financeRouter.use('/finance', requireOwner);
@@ -502,4 +504,86 @@ financeRouter.post('/finance/fixed/to-plan', async (req, res) => {
     await writeLog(c, { userId: u.id, folder: 'fin', finScope: 'report', text: `P&L план: перенесено постійні витрати на 12 міс. (${months[0]} – ${months[11]})` });
   });
   res.json({ ok: true, months: months.length, lines: byLine.size });
+});
+
+/* ---------- Імпорт обліку і плану P&L з Excel ---------- */
+
+const xlsxUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024, files: 1 } }).single('file');
+const receiveXlsx = (req: Request, res: Response) =>
+  new Promise<Buffer>((ok, bad) =>
+    xlsxUpload(req, res, (err: unknown) => {
+      if (err) return bad(badRequest('Не вдалося отримати файл (до 20 МБ).'));
+      const f = req.file;
+      if (!f) return bad(badRequest('Виберіть файл .xlsx.'));
+      if (!/\.xlsx$/i.test(f.originalname)) return bad(badRequest('Потрібен файл Excel (.xlsx). З Numbers: Файл → Експортувати → Excel.'));
+      ok(f.buffer);
+    }),
+  );
+
+/** Імпорт обліку: колонки Дата | Стаття | Підстаття | Обєкт | Контрагент | Примітка | USD | UAH | UAH(готівка). */
+financeRouter.post('/finance/cash/import', async (req, res) => {
+  const u = me(req);
+  const buf = await receiveXlsx(req, res);
+  const wb = await loadWorkbook(buf).catch(() => {
+    throw badRequest('Файл не читається як Excel (.xlsx).');
+  });
+  const ws = wb.worksheets.find((w) => w.name.trim() === 'Облік') ?? wb.worksheets[0]!;
+  let parsed;
+  try {
+    parsed = parseCashSheet(ws);
+  } catch (e) {
+    throw badRequest((e as Error).message);
+  }
+  const r = await tx(async (c) => {
+    const x = await importCash(c, parsed.rows, u.id);
+    await writeLog(c, {
+      userId: u.id,
+      folder: 'fin',
+      finScope: 'report',
+      text: `Облік: імпорт з файлу — додано ${x.added}, уже були ${x.duplicates}, пропущено ${parsed.skipped.length}`,
+    });
+    return x;
+  });
+  res.json({
+    rows: parsed.total,
+    ...r,
+    skipped: parsed.skipped,
+    card: parsed.rows.filter((x) => x.account === 'Карта').reduce((t, x) => t + x.sum, 0),
+    cash: parsed.rows.filter((x) => x.account === 'Готівка').reduce((t, x) => t + x.sum, 0),
+  });
+});
+
+/** Імпорт плану P&L: перший стовпець — назва рядка, у заголовку — місяці. Перезаписує план цих місяців і рядків. */
+financeRouter.post('/finance/pnl/import', async (req, res) => {
+  const u = me(req);
+  const buf = await receiveXlsx(req, res);
+  const wb = await loadWorkbook(buf).catch(() => {
+    throw badRequest('Файл не читається як Excel (.xlsx).');
+  });
+  let parsed;
+  try {
+    parsed = parsePnlSheet(wb.worksheets[0]!);
+  } catch (e) {
+    throw badRequest((e as Error).message);
+  }
+  await tx(async (c) => {
+    for (const x of parsed.cells) {
+      const k = LINE_KIND[x.line];
+      // план витрат і доходів — без знака (знак визначає рядок), «Кредити» / «Позика» — зі знаком
+      const amount = k === 'mix' ? x.amount : Math.abs(x.amount);
+      await c.query(
+        `INSERT INTO pnl_plan (month, line, amount, updated_by) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (month, line) DO UPDATE SET amount = EXCLUDED.amount, updated_at = now(), updated_by = EXCLUDED.updated_by`,
+        [x.month, x.line, amount, u.id],
+      );
+    }
+    const ms = [...new Set(parsed.cells.map((x) => x.month))].sort();
+    await writeLog(c, {
+      userId: u.id,
+      folder: 'fin',
+      finScope: 'report',
+      text: `P&L план: імпорт з файлу — ${parsed.cells.length} значень${ms.length ? ` (${ms[0]} – ${ms.at(-1)})` : ''}`,
+    });
+  });
+  res.json({ cells: parsed.cells.length, months: [...new Set(parsed.cells.map((x) => x.month))].sort() });
 });

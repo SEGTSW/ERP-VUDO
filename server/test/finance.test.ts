@@ -223,3 +223,58 @@ describe('аналітика (11)', () => {
     expect((await (await loginAs('roman')).get('/api/stats')).status).toBe(403);
   });
 });
+
+describe('імпорт з Excel (10.1, 10.2)', () => {
+  async function xlsx(build: (ws: import('exceljs').Worksheet) => void, name = 'Облік') {
+    const ExcelJS = (await import('exceljs')).default;
+    const wb = new ExcelJS.Workbook();
+    build(wb.addWorksheet(name));
+    return Buffer.from(await wb.xlsx.writeBuffer());
+  }
+
+  it('облік: дата текстом, рядки без дати, карта + готівка в одному рядку, повторний імпорт без дублів', async () => {
+    const { a } = await setup();
+    const buf = await xlsx((ws) => {
+      ws.addRow(['Дата', 'Стаття', 'Підстаття', 'Обєкт', 'Контрагент ', 'Примітка', 'USD', 'UAH', 'UAH(готівка)']);
+      ws.addRow(['Старт 15.07.2026', 'Дохід', 'Зведення обліку', 'VUDO', 'VUDO', 'Сума для зведення', null, 32072]);
+      ws.addRow([new Date(Date.UTC(2026, 6, 21)), 'Витрата', 'Маркетинг', 'Фейсбук', 'VUDO', 'Реклама ФБ', null, -180]);
+      ws.addRow([new Date(Date.UTC(2026, 6, 21)), 'Витрата', 'Маркетинг', 'Фейсбук', 'VUDO', 'Реклама ФБ', null, -180]);
+      ws.addRow([null, 'Витрата', 'Адміністративні', 'Пальне', 'VUDO', 'Пальне', null, -500, -300]);
+      ws.addRow(['Новий місяць 01.10.2026']);
+      ws.addRow([new Date(Date.UTC(2026, 9, 2)), 'Позика+', 'Поповнення', 'VUDO', 'Єфімов', 'Позика', null, 6000]);
+    });
+    const r = await a.agent.post('/api/finance/cash/import').set('X-VUDO', '1').attach('file', buf, 'облік.xlsx');
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({ rows: 5, added: 6, duplicates: 0, skipped: [], card: 37212, cash: -300 });
+    // однакові операції в одному файлі — обидві справжні
+    expect((await a.get('/api/finance/cash?month=')).body.rows.filter((x: { note: string }) => x.note === 'Реклама ФБ')).toHaveLength(2);
+    const cash = (await a.get('/api/finance/cash?month=')).body.rows.filter((x: { derived: string | null }) => !x.derived);
+    const fuel = cash.filter((x: { note: string }) => x.note === 'Пальне');
+    expect(fuel.map((x: { date: string; account: string; sum: number }) => [x.date, x.account, x.sum]).sort()).toEqual([
+      ['2026-07-21', 'Готівка', -300],
+      ['2026-07-21', 'Карта', -500],
+    ]);
+    expect(cash.find((x: { cat: string }) => x.cat === 'Зведення обліку')).toMatchObject({ date: '2026-07-15', line: 'none' });
+    const again = await a.agent.post('/api/finance/cash/import').set('X-VUDO', '1').attach('file', buf, 'облік.xlsx');
+    expect(again.body).toMatchObject({ added: 0, duplicates: 6 });
+    const m = await loginAs('iryna');
+    expect((await m.agent.post('/api/finance/cash/import').set('X-VUDO', '1').attach('file', buf, 'облік.xlsx')).status).toBe(403);
+  });
+
+  it('план P&L: місяці з заголовка, назви рядків, витрати без знака', async () => {
+    const { a } = await setup();
+    const buf = await xlsx((ws) => {
+      ws.addRow([null, 'До', '10.2026', new Date(Date.UTC(2026, 10, 1))]);
+      ws.addRow(['Дохід ', 1750231, 952000, 1120000]);
+      ws.addRow(['Витрати', -1577131, 680000, 800000]);
+      ws.addRow(['Фонд оплати праці', null, -175000, -175000]);
+      ws.addRow(['Майбутні витрати закриті', null, 321850, null]);
+      ws.addRow(['Позика', null, 124587.7, null]);
+    }, 'Аркуш 1');
+    const r = await a.agent.post('/api/finance/pnl/import').set('X-VUDO', '1').attach('file', buf, 'pnl.xlsx');
+    expect(r.body).toMatchObject({ months: ['2026-10', '2026-11'] });
+    const p = (await a.get('/api/finance/pnl?year=2026')).body;
+    expect(p.plan['2026-10']).toEqual({ income: 952000, orderCost: 680000, payroll: 175000, loan: 124587.7 });
+    expect(p.plan['2026-11']).toEqual({ income: 1120000, orderCost: 800000, payroll: 175000 });
+  });
+});

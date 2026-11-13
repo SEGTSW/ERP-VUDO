@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { INVEST_LINES, OPEX_LINES, lineLabel, planSigned, pnlDerived, type LineSums, type PnlLine } from '@vudo/shared';
 import { api, errorText } from '../api';
 import { useToast } from '../ui/toast';
+import { ImportButton } from './ImportButton';
 
 interface PnlData {
   year: number;
@@ -151,6 +152,7 @@ export function PnlTab() {
           ))}
         </select>
         <span className="grow" />
+        <ImportButton kind="pnl" />
         <small className="muted">План вводиться в клітинки (витрати без мінуса), факт рахується з обліку.</small>
       </div>
       <div className="tbl-wrap pnlwrap" ref={wrap}>
@@ -206,7 +208,7 @@ export function PnlTab() {
       <div className="note" style={{ marginTop: 12 }}>
         Виручка = дохід + витрати на замовлення (витрати від'ємні). Результат = виручка + адміністративні, ФОП, інші, маркетинг, податки, логістика,
         співпраці, кредити, оборотні кошти. Операції з рядком «не в P&L» (обмін коштів, зведення) рахуються лише в грошовому потоці й залишку.
-        Стартовий план з вашого файлу P&L внесемо, щойно надішлете файл.
+        План можна імпортувати з Excel: перший стовпець — назва рядка, у заголовку — місяці (ММ.РРРР).
       </div>
     </>
   );

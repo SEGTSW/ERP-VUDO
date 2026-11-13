@@ -9,6 +9,7 @@ import { ConfirmButton, Modal, WarnBox } from '../ui/common';
 import { SubTabs, XlButton } from '../ui/bits';
 import { useToast } from '../ui/toast';
 import { PnlTab } from '../finance/PnlTab';
+import { ImportButton } from '../finance/ImportButton';
 import { FixedTab } from '../finance/FixedTab';
 import { DebtsTab, DesignersTab, PaymentsTab, SalariesTab } from '../finance/MoneyTabs';
 
@@ -153,6 +154,7 @@ function CashTab() {
           ))}
         </select>
         <input placeholder="Пошук: об'єкт, примітка, контрагент" value={text} onChange={(e) => setText(e.target.value)} style={{ flex: 1, minWidth: 180 }} aria-label="Пошук" />
+        <ImportButton kind="cash" />
         <button type="button" className="btn pri" onClick={() => setModal({})}>
           + Операція
         </button>
@@ -220,7 +222,7 @@ function CashTab() {
       </div>
       <div className="note" style={{ marginTop: 12 }}>
         Оплати клієнтів (і виплати дизайнерам) потрапляють сюди автоматично — їх змінюють у замовленні. Рядок P&L для кожної операції береться зі
-        статейника. Імпорт вашого обліку з Numbers/Excel буде додано, щойно надішлете файл.
+        статейника. Імпорт з Excel не дублює вже внесені операції (звірка за датою, приміткою, сумою й касою).
       </div>
       {modal && <CashModal edit={modal.edit} onClose={() => setModal(null)} />}
     </>
