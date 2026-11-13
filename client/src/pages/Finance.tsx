@@ -10,10 +10,11 @@ import { SubTabs, XlButton } from '../ui/bits';
 import { useToast } from '../ui/toast';
 import { PnlTab } from '../finance/PnlTab';
 import { ImportButton } from '../finance/ImportButton';
+import { LoansTab, PayablesTab } from '../finance/RegistersTabs';
 import { FixedTab } from '../finance/FixedTab';
 import { DebtsTab, DesignersTab, PaymentsTab, SalariesTab } from '../finance/MoneyTabs';
 
-type Tab = 'cash' | 'pnl' | 'pay' | 'debt' | 'des' | 'sal' | 'fixed' | 'arts';
+type Tab = 'cash' | 'pnl' | 'pay' | 'debt' | 'des' | 'sal' | 'fixed' | 'loans' | 'bills' | 'arts';
 const MONTHS = ['Січень', 'Лютий', 'Березень', 'Квітень', 'Травень', 'Червень', 'Липень', 'Серпень', 'Вересень', 'Жовтень', 'Листопад', 'Грудень'];
 const monthName = (m: string) => `${MONTHS[Number(m.slice(5, 7)) - 1]} ${m.slice(0, 4)}`;
 const plain = (n: number) => money(n).replace(/\s?грн$/, '');
@@ -31,6 +32,8 @@ export function Finance() {
         ['des', 'Дизайнерам'],
         ['sal', 'Нарахування'],
         ['fixed', 'Постійні витрати'],
+        ['bills', 'Рахунки до оплати'],
+        ['loans', 'Позики'],
         ['arts', 'Статейник'],
       ]
     : [
@@ -55,6 +58,8 @@ export function Finance() {
       {tab === 'des' && <DesignersTab />}
       {tab === 'sal' && <SalariesTab />}
       {tab === 'fixed' && <FixedTab />}
+      {tab === 'loans' && <LoansTab />}
+      {tab === 'bills' && <PayablesTab />}
     </>
   );
 }
