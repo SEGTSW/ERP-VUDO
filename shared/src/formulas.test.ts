@@ -164,3 +164,29 @@ describe('P&L — формули 18–19', () => {
     expect(planSigned('income', 100)).toBe(100);
   });
 });
+
+describe('позики і рахунки до оплати', () => {
+  it('позика: повернення погашають найстаріші внески; прострочення', async () => {
+    const { loanSummary, payableState, paymentPurpose } = await import('./loans.js');
+    expect(paymentPurpose({ purpose: 'за фасади', invoice: '№12 від 01.11.2026', vat: 2000, amount: 12000 }, 6000).replace(/\s/g, ' ')).toBe(
+      'Оплата за фасади згідно рах. №12 від 01.11.2026, у т.ч. ПДВ 1 000,00 грн',
+    );
+    const s = loanSummary(
+      [
+        { id: 1, date: '2026-09-01', kind: 'in', sum: 10000, dueDate: '2026-10-01' },
+        { id: 2, date: '2026-10-10', kind: 'in', sum: 6000, dueDate: '2026-12-01' },
+        { id: 3, date: '2026-10-20', kind: 'out', sum: 4000, dueDate: null },
+      ],
+      '2026-11-13',
+      20000,
+    );
+    expect(s).toMatchObject({ deposited: 16000, returned: 4000, debt: 12000, overdue: 6000, nextDue: '2026-10-01', limitLeft: 8000 });
+    expect(s.states).toEqual([
+      { id: 1, remaining: 6000, status: 'Прострочено' },
+      { id: 2, remaining: 6000, status: 'Діє' },
+    ]);
+    expect(payableState(1000, 0, '2026-11-01', '2026-11-13')).toEqual({ left: 1000, status: 'Прострочено' });
+    expect(payableState(1000, 400, '2026-12-01', '2026-11-13')).toEqual({ left: 600, status: 'Частково' });
+    expect(payableState(1000, 1000, '2026-11-01', '2026-11-13')).toEqual({ left: 0, status: 'Сплачено' });
+  });
+});

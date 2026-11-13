@@ -25,6 +25,7 @@ import { statsRouter } from './routes/stats.js';
 import { timeRouter } from './routes/time.js';
 import { kbRouter } from './routes/kb.js';
 import { exportRouter } from './routes/export.js';
+import { registersRouter } from './routes/registers.js';
 
 function clientDist(): string | null {
   const here = path.dirname(fileURLToPath(import.meta.url));
@@ -91,6 +92,7 @@ export function createApp() {
   api.use(timeRouter);
   api.use(kbRouter);
   api.use(exportRouter);
+  api.use(registersRouter);
   api.use(() => {
     throw new HttpError(404, 'Невідомий запит.');
   });

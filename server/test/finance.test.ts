@@ -278,3 +278,45 @@ describe('імпорт з Excel (10.1, 10.2)', () => {
     expect(p.plan['2026-11']).toEqual({ income: 1120000, orderCost: 800000, payroll: 175000 });
   });
 });
+
+describe('позики і рахунки до оплати', () => {
+  it('позика: надходження й повернення пишуться в облік; борг, прострочення; не більше боргу', async () => {
+    const { a } = await setup();
+    await a.post('/api/finance/loans', { lender: 'Єфімов Дем’ян', contract: 'ПФД №1', limit: 50000 });
+    const id = (await a.get('/api/finance/loans')).body.rows[0].id;
+    await a.post(`/api/finance/loans/${id}/ops`, { date: '2026-10-10', kind: 'in', sum: 6000, method: 'безготівково', dueDate: '2026-10-15' });
+    await a.post(`/api/finance/loans/${id}/ops`, { date: '2026-10-12', kind: 'in', sum: 4000, method: 'готівка', dueDate: '2099-01-01', toCash: false });
+    expect((await a.post(`/api/finance/loans/${id}/ops`, { date: today, kind: 'out', sum: 20000, method: 'готівка' })).body.error).toMatch(/не більше боргу ТОВ/);
+    await a.post(`/api/finance/loans/${id}/ops`, { date: today, kind: 'out', sum: 1000, method: 'безготівково' });
+    const r = (await a.get('/api/finance/loans')).body;
+    expect(r.rows[0]).toMatchObject({ deposited: 10000, returned: 1000, debt: 9000, overdue: 5000, limitLeft: 41000 });
+    expect(r).toMatchObject({ debt: 9000, overdue: 5000 });
+    // в облік: +6 000 (Позика+) і −1 000 (Позика-); 4 000 — без запису
+    const cash = (await a.get('/api/finance/cash?month=')).body.rows.filter((x: { type: string }) => x.type.startsWith('Позика'));
+    expect(cash.map((x: { sum: number }) => x.sum).sort((p: number, q: number) => p - q)).toEqual([-1000, 6000]);
+    expect(cash.every((x: { line: string }) => x.line === 'loan')).toBe(true);
+    const m = await loginAs('iryna');
+    expect((await m.get('/api/finance/loans')).status).toBe(403);
+  });
+
+  it('рахунок до оплати: часткова оплата, статус, витрата в облік на замовлення', async () => {
+    const { a, o } = await setup();
+    expect((await a.post('/api/finance/payables', { counterparty: 'Віяр', amount: 100, iban: 'UA12' })).body.error).toBe('IBAN: UA і 27 цифр.');
+    await a.post('/api/finance/payables', {
+      counterparty: 'Віяр', iban: 'UA21 3223 1300 0002 6007 2335 6600 1', purpose: 'за ДСП', invoice: '№55', amount: 12000, vat: 2000, dueDate: '2026-01-01', orderId: o.id,
+    });
+    let r = (await a.get('/api/finance/payables')).body;
+    expect(r.rows[0]).toMatchObject({ status: 'Прострочено', left: 12000, iban: 'UA213223130000026007233566001' });
+    expect(r.rows[0].purposeText.replace(/\s/g, ' ')).toBe('Оплата за ДСП згідно рах. №55, у т.ч. ПДВ 2 000,00 грн');
+    const id = r.rows[0].id;
+    expect((await a.post(`/api/finance/payables/${id}/pay`, { date: today, sum: 20000, account: 'Карта' })).body.error).toMatch(/Залишок до сплати/);
+    await a.post(`/api/finance/payables/${id}/pay`, { date: today, sum: 5000, account: 'Карта' });
+    r = (await a.get('/api/finance/payables')).body;
+    expect(r.rows[0]).toMatchObject({ left: 7000, status: 'Прострочено' });
+    expect(r.toPay).toBe(7000);
+    const costs = (await a.get(`/api/finance/orders/${o.id}/costs`)).body;
+    expect(costs).toMatchObject({ fact: 5000, materials: 5000 });
+    await a.post(`/api/finance/payables/${id}/pay`, { date: today, sum: 7000, account: 'Готівка' });
+    expect((await a.get('/api/finance/payables')).body.rows[0]).toMatchObject({ left: 0, status: 'Сплачено' });
+  });
+});
