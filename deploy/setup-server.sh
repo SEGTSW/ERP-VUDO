@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Перше налаштування сервера Hetzner (Ubuntu 24.04) для VUDO ERP. Запускати від root один раз:
 #   DOMAIN=erp.example.com EMAIL=you@example.com bash setup-server.sh
+# Без власного домену: DOMAIN=<IP через дефіси>.sslip.io (напр. 65-109-169-8.sslip.io). EMAIL — необов'язковий.
 set -euo pipefail
 
 : "${DOMAIN:?Вкажіть DOMAIN=erp.ваш-домен.ua}"
-: "${EMAIL:?Вкажіть EMAIL для сертифіката Let’s Encrypt}"
+EMAIL="${EMAIL:-}"
 REPO="${REPO:-https://github.com/SEGTSW/ERP-VUDO.git}"
 APP_DIR=/opt/vudo
 DATA_DIR=/var/lib/vudo
@@ -84,7 +85,12 @@ sed "s/__DOMAIN__/${DOMAIN}/g" "$APP_DIR/deploy/nginx.conf" > /etc/nginx/sites-a
 ln -sf /etc/nginx/sites-available/vudo /etc/nginx/sites-enabled/vudo
 rm -f /etc/nginx/sites-enabled/default
 nginx -t && systemctl reload nginx
-certbot --nginx --non-interactive --agree-tos -m "$EMAIL" -d "$DOMAIN" --redirect
+if [[ -n "$EMAIL" ]]; then
+  certbot --nginx --non-interactive --agree-tos -m "$EMAIL" -d "$DOMAIN" --redirect
+else
+  # без пошти: сертифікат і автооновлення працюють, лише немає листів-нагадувань
+  certbot --nginx --non-interactive --agree-tos --register-unsafely-without-email -d "$DOMAIN" --redirect
+fi
 
 echo
 echo "Готово. Далі створіть першого власника:"
