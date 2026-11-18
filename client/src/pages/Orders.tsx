@@ -63,7 +63,7 @@ function OfficeOrders() {
       </div>
       <div className="bar">
         <input
-          placeholder="Пошук: номер, ПІБ, телефон"
+          placeholder="Пошук: номер, ПІБ, телефон, адреса"
           value={f.q}
           onChange={(e) => setF({ ...f, q: e.target.value })}
           style={{ flex: 1, minWidth: 200 }}
@@ -96,6 +96,7 @@ function OfficeOrders() {
             <tr>
               <th>№</th>
               <th>Клієнт</th>
+              <th>Адреса</th>
               <th>Статус</th>
               <th>Менеджер</th>
               <th className="r">Ціна</th>
@@ -112,6 +113,7 @@ function OfficeOrders() {
                   <div>{o.client.name}</div>
                   <small className="muted num">{o.client.phone}</small>
                 </td>
+                <td>{o.address || '—'}</td>
                 <td>
                   <StatusPill s={o.status} />
                   {!!o.late && <div className="late">прострочено на {o.late} дн.</div>}

@@ -85,7 +85,7 @@ ordersRouter.get('/orders', async (req, res) => {
   const search = `($1 = '' OR lower(o.num) LIKE '%' || $1 || '%' OR o.client_id IN (
       SELECT id FROM clients WHERE lower(name) LIKE '%' || $1 || '%'
         OR (length($2) >= 3 AND regexp_replace(coalesce(phone, ''), '\\D', '', 'g') LIKE '%' || $2 || '%'))
-      ${isOffice(u) ? '' : `OR lower(coalesce(o.address, '')) LIKE '%' || $1 || '%'`})`;
+      OR lower(coalesce(o.address, '')) LIKE '%' || $1 || '%')`;
 
   if (!isOffice(u)) {
     let where = `NOT o.archived AND o.status NOT IN ('Відмова', 'Закрито') AND ${search}`;

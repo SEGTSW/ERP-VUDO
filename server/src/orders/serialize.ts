@@ -91,6 +91,7 @@ export async function officeList(db: Db, orders: OrderAgg[], s: Settings) {
       num: o.num,
       createdDate: o.createdDate,
       client: { id: o.client.id, name: o.client.name, phone: o.client.phone },
+      address: o.address,
       status: o.status,
       statusSince: o.statusSince,
       late,

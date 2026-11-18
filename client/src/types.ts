@@ -60,6 +60,7 @@ export interface OrderListItem {
   num: string;
   createdDate: string;
   client: { id: number; name: string; phone: string | null };
+  address: string | null;
   status: Status;
   statusSince: string;
   late: number;
