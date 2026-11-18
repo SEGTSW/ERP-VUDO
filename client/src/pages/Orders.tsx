@@ -98,7 +98,6 @@ function OfficeOrders() {
               <th>Клієнт</th>
               <th>Адреса</th>
               <th>Статус</th>
-              <th>Менеджер</th>
               <th className="r">Ціна</th>
               <th className="r">Оплачено</th>
               <th className="r">Борг</th>
@@ -118,7 +117,6 @@ function OfficeOrders() {
                   <StatusPill s={o.status} />
                   {!!o.late && <div className="late">прострочено на {o.late} дн.</div>}
                 </td>
-                <td>{o.managerName}</td>
                 <td className="r num">{o.price ? money(o.price) : '—'}</td>
                 <td className="r num">{o.paid ? money(o.paid) : '—'}</td>
                 <td className={`r num ${o.debt > 0 && o.paid > 0 ? 'debt' : ''}`}>{o.price ? money(o.debt) : '—'}</td>
