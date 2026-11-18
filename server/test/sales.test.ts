@@ -29,14 +29,14 @@ async function newOrder(m: S, managerId: number, phone = '+380 67 111 22 33', na
 const pre = (korpus: number) => ({ korpus });
 
 describe('нове звернення (5.2)', () => {
-  it('створює клієнта і замовлення з номером РРРР-NNNN; журнал', async () => {
+  it('створює клієнта і замовлення з номером 1, 2, 3…; журнал', async () => {
     const { ids, m } = await team();
     const o = await newOrder(m, ids.iryna);
-    expect(o.num).toBe(`${kyivToday().slice(0, 4)}-0001`);
+    expect(o.num).toBe('1');
     expect(o.status).toBe('Звернення');
     expect(o.client.name).toBe('Олена Петренко');
     const o2 = await newOrder(m, ids.iryna, '+380 50 000 00 00', 'Інший');
-    expect(o2.num).toBe(`${kyivToday().slice(0, 4)}-0002`);
+    expect(o2.num).toBe('2');
     expect(await logTexts()).toContain(`Створено звернення №${o.num}`);
   });
 
@@ -364,7 +364,7 @@ describe('список замовлень', () => {
     await newOrder(m, ids.iryna, '+380509998877', 'Ігор Бойко');
     expect((await m.get('/api/orders?q=петрен')).body.map((o: { id: number }) => o.id)).toEqual([a.id]);
     expect((await m.get('/api/orders?q=998')).body).toHaveLength(1);
-    expect((await m.get('/api/orders?q=-0001')).body.map((o: { id: number }) => o.id)).toEqual([a.id]);
+    expect((await m.get('/api/orders?q=1')).body.map((o: { id: number }) => o.id)).toEqual([a.id]);
     await m.post(`/api/orders/${a.id}/status`, { to: 'Відмова', mode: 'step', values: { refuseReason: 'x' } });
     const t = await loginAs('taras');
     expect((await t.get('/api/orders')).body).toHaveLength(1);

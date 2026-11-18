@@ -110,7 +110,7 @@ ordersRouter.get('/orders', async (req, res) => {
   let list = await officeList(pool, await fetchOrders(pool, where, params), settings);
   if (q.late === '1') list = list.filter((o) => o.late > 0);
   // новіші вгорі
-  list.sort((a, b) => b.num.localeCompare(a.num));
+  list.sort((a, b) => b.num.localeCompare(a.num, undefined, { numeric: true }));
   res.json(list);
 });
 
@@ -187,7 +187,7 @@ ordersRouter.post('/orders', requireOffice, async (req, res) => {
     }
 
     const num = await c.query<{ num: string }>(
-      `SELECT to_char(now() AT TIME ZONE 'Europe/Kyiv', 'YYYY') || '-' || lpad(nextval('order_num_seq')::text, 4, '0') AS num`,
+      `SELECT nextval('order_num_seq')::text AS num`,
     );
     const r = await c.query<{ id: number; num: string }>(
       `INSERT INTO orders (num, client_id, address, manager_id, source, designer_id, comment, created_by)

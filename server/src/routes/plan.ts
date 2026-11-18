@@ -191,7 +191,7 @@ export function visitsFor(orders: OrderAgg[], userId: number, isMeasurer: boolea
     const o = orders.find((x) => x.id === v.orderId)!;
     v.done = v.taskIds.length > 0 && v.taskIds.every((id) => o.tasks.find((t) => t.id === id)!.progress >= 100);
   }
-  return [...out.values()].sort((a, b) => a.stage.localeCompare(b.stage) || a.num.localeCompare(b.num));
+  return [...out.values()].sort((a, b) => a.stage.localeCompare(b.stage) || a.num.localeCompare(b.num, undefined, { numeric: true }));
 }
 
 const dayQuery = z.object({
