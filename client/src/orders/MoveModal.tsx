@@ -6,7 +6,7 @@ import type { OfficeCard } from '../types';
 import { Modal, WarnBox } from '../ui/common';
 import { useToast } from '../ui/toast';
 import { usePeople } from './hooks';
-import { InstallersPick, PersonSelect } from './PeoplePick';
+import { MultiPick, PersonSelect } from './PeoplePick';
 
 export interface MoveDefaults {
   address?: string | null;
@@ -104,7 +104,7 @@ export function MoveModal({
             return (
               <div className="f" key={f.key}>
                 {f.label} *
-                <InstallersPick people={people} value={v.installerIds} onChange={(x) => setV({ ...v, installerIds: x })} />
+                <MultiPick people={people} role="Монтажник" value={v.installerIds} onChange={(x) => setV({ ...v, installerIds: x })} />
               </div>
             );
           default:

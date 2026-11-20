@@ -123,7 +123,7 @@ async function ordersSheets(req: Request, u: User): Promise<Sheet[]> {
       designer: des ? [des.name, des.company].filter(Boolean).join(' · ') : '',
       address: c.address,
       measurer: nm(c.measurerId),
-      constructor: nm(c.constructorId),
+      constructor: (c.constructorIds as number[]).map(nm).join(', '),
       installers: (c.installerIds as number[]).map(nm).join(', '),
       measureDate: c.measureDate,
       installDate: c.installDate,

@@ -76,7 +76,7 @@ describe('дата заміру — факт від менеджера', () => {
     const d = addDays(today, 2);
     await m.patch(`/api/orders/${o.id}`, {
       clientId: card.client.id, address: 'Київ, Хрещатик 1', source: 'сайт', designerId: null, managerId: ids.iryna, measurerId: ids.taras,
-      constructorId: null, installerIds: [], measureDate: d, installDate: null, readyDate: null, delivery: 0, discount: 0, discountType: 'грн', comment: '',
+      constructorIds: [], installerIds: [], measureDate: d, installDate: null, readyDate: null, delivery: 0, discount: 0, discountType: 'грн', comment: '',
     });
     const t = await loginAs('taras');
     const plan = (await t.get('/api/plan')).body;
@@ -106,7 +106,7 @@ describe('дата заміру — факт від менеджера', () => {
     const card = r.body;
     await m.patch(`/api/orders/${o.id}`, {
       clientId: card.client.id, address: 'Ірпінь', source: 'сайт', designerId: null, managerId: ids.iryna, measurerId: ids.taras,
-      constructorId: null, installerIds: [], measureDate: addDays(today, 3), installDate: null, readyDate: null, delivery: 0, discount: 0, discountType: 'грн', comment: '',
+      constructorIds: [], installerIds: [], measureDate: addDays(today, 3), installDate: null, readyDate: null, delivery: 0, discount: 0, discountType: 'грн', comment: '',
     });
     const c2 = (await m.get(`/api/orders/${o.id}`)).body;
     expect(c2.tasks.find((x: { stage: string }) => x.stage === 'Замір')).toMatchObject({ startDate: addDays(today, 3), progress: 100 });
@@ -126,7 +126,7 @@ describe('Мій день (8А.3)', () => {
     const { o, card, m, ids } = await setup();
     await m.patch(`/api/orders/${o.id}`, {
       clientId: card.client.id, address: 'Київ, Хрещатик 1', source: 'сайт', designerId: null, managerId: ids.iryna, measurerId: ids.taras,
-      constructorId: null, installerIds: [ids.oleh], measureDate: null, installDate: addDays(today, 3), readyDate: null, delivery: 0, discount: 0,
+      constructorIds: [], installerIds: [ids.oleh], measureDate: null, installDate: addDays(today, 3), readyDate: null, delivery: 0, discount: 0,
       discountType: 'грн', comment: 'Поверх 5',
     });
     // монтажники приходять числами — інакше поле в картці «губить» вибір, а виїзд не знаходиться

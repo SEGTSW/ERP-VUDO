@@ -7,7 +7,7 @@ interface OrderPeople {
   status: Status;
   managerId: number;
   measurerId: number | null;
-  constructorId: number | null;
+  constructorIds: number[];
   installerIds: number[];
   /** Дата заміру з картки: етап «Замір» стоїть саме на ній (1 день). */
   measureDate?: string | null;
@@ -29,12 +29,17 @@ function fromCard(o: OrderPeople, st: PlanStage): number | null {
     case 'Замір':
       return o.measurerId;
     case 'Конструктив':
-      return o.constructorId;
+      return o.constructorIds[0] ?? null;
     case 'Монтаж':
       return o.installerIds[0] ?? null;
     case 'Збірка':
       return null;
   }
+}
+
+/** Усі закріплені за етапом у картці: конструктори для «Конструктив», монтажники для «Монтаж». */
+export function stageTeam(o: { constructorIds: number[]; installerIds: number[] }, st: PlanStage): number[] {
+  return st === 'Конструктив' ? o.constructorIds : st === 'Монтаж' ? o.installerIds : [];
 }
 
 async function firstActive(db: Db, role: Role): Promise<number | null> {
@@ -69,7 +74,7 @@ export async function makePlan(db: Db, o: OrderPeople, today = kyivToday()): Pro
 /** План для замовлень, у яких його ще немає (наприклад, створених до переходу на план по об'єкту). */
 export async function ensureAllPlans(db: Db): Promise<number> {
   const r = await db.query<OrderPeople>(
-    `SELECT id, status, manager_id AS "managerId", measurer_id AS "measurerId", constructor_id AS "constructorId",
+    `SELECT id, status, manager_id AS "managerId", measurer_id AS "measurerId", constructor_ids AS "constructorIds",
             installer_ids AS "installerIds", measure_date AS "measureDate"
        FROM orders o WHERE NOT EXISTS (SELECT 1 FROM plan_tasks t WHERE t.order_id = o.id)`,
   );
@@ -80,7 +85,7 @@ export async function ensureAllPlans(db: Db): Promise<number> {
 /**
  * Оновлює відповідальних у незавершених етапах за полями картки:
  * Замір → замірник, Конструктив → конструктор, Прорахунок → менеджер,
- * Монтаж → перший монтажник (якщо поточний відповідальний не серед вибраних).
+ * Конструктив / Монтаж → перший вибраний (якщо поточний відповідальний не серед вибраних).
  */
 export async function applyPeople(db: Db, o: OrderPeople): Promise<number> {
   let n = 0;
@@ -91,8 +96,8 @@ export async function applyPeople(db: Db, o: OrderPeople): Promise<number> {
       `UPDATE plan_tasks SET assignee_id = $3
         WHERE order_id = $1 AND stage = $2 AND progress < 100
           AND assignee_id IS DISTINCT FROM $3
-          AND NOT ($2 = 'Монтаж' AND assignee_id = ANY($4::bigint[]))`,
-      [o.id, st, who, o.installerIds],
+          AND NOT ($2 = ANY('{Конструктив,Монтаж}') AND assignee_id = ANY($4::bigint[]))`,
+      [o.id, st, who, stageTeam(o, st)],
     );
     n += r.rowCount ?? 0;
   }

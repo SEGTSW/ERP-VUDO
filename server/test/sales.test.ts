@@ -127,7 +127,7 @@ function mainOf(card: Record<string, unknown> & { client: { id: number } }) {
     designerId: (card.designer as { id: number } | null)?.id ?? null,
     managerId: card.managerId,
     measurerId: card.measurerId,
-    constructorId: card.constructorId,
+    constructorIds: card.constructorIds,
     installerIds: card.installerIds,
     measureDate: card.measureDate,
     installDate: card.installDate,

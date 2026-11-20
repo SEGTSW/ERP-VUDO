@@ -35,9 +35,9 @@ export function PersonSelect({
   );
 }
 
-/** Монтажники: випадний список з галочками, у полі — імена через кому. */
-export function InstallersPick({ people, value, onChange }: { people: Person[]; value: number[]; onChange: (v: number[]) => void }) {
-  const list = peopleWith(people, ['Монтажник'], value);
+/** Кілька людей з роллю (монтажники, конструктори): випадний список з галочками, у полі — імена через кому. */
+export function MultiPick({ people, role, value, onChange }: { people: Person[]; role: Role; value: number[]; onChange: (v: number[]) => void }) {
+  const list = peopleWith(people, [role], value);
   const ref = useRef<HTMLDetailsElement>(null);
   // Закрити список кліком поза ним
   useEffect(() => {
@@ -64,7 +64,7 @@ export function InstallersPick({ people, value, onChange }: { people: Person[]; 
             </label>
           ))
         ) : (
-          <span className="muted">Немає працівників з роллю «Монтажник» — додайте в Налаштуваннях.</span>
+          <span className="muted">Немає працівників з роллю «{role}» — додайте в Налаштуваннях.</span>
         )}
       </div>
     </details>

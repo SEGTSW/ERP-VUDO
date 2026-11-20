@@ -7,7 +7,7 @@ import { badRequest, forbidden, notFound } from '../errors.js';
 import { me, requireOffice, requireSection } from '../auth/middleware.js';
 import { writeLog } from '../audit.js';
 import { fetchOrder, fetchOrders, taskSchedule, type OrderAgg, type TaskRow } from '../orders/repo.js';
-import { makePlan } from '../orders/plan.js';
+import { makePlan, stageTeam } from '../orders/plan.js';
 import { checkPerson } from '../orders/people.js';
 
 export const planRouter = Router();
@@ -21,6 +21,7 @@ planRouter.get('/plan', requireSection('plan'), async (_req, res) => {
     const sch = taskSchedule(o);
     return o.tasks.map((t) => ({
       ...t,
+      team: stageTeam(o, t.stage),
       address: o.address,
       itemNames: o.items.map((i) => i.name),
       assigneeRoles: t.assigneeId ? (rolesOf.get(t.assigneeId) ?? []) : [],
@@ -67,7 +68,7 @@ planRouter.patch('/plan/tasks/:id', async (req, res) => {
   const u = me(req);
   const { t, o } = await taskWithOrder(id);
   const office = isOffice(u);
-  if (!office && t.assigneeId !== u.id) throw forbidden('Змінювати етап може відповідальний або менеджер.');
+  if (!office && t.assigneeId !== u.id && !stageTeam(o, t.stage).includes(u.id)) throw forbidden('Змінювати етап може відповідальний або менеджер.');
   if (b.assigneeId != null && b.assigneeId !== t.assigneeId && !office) throw forbidden('Відповідального змінює лише менеджер або адмін.');
   // Дату заміру ставить менеджер або власник; замірник лише позначає виконання.
   const measureMoved = t.stage === 'Замір' && (b.days !== t.days || b.startDate !== (t.startDate ?? null));

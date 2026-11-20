@@ -5,7 +5,7 @@ import { api } from '../../api';
 import type { ClientRow, OfficeCard } from '../../types';
 import { ConfirmButton } from '../../ui/common';
 import { useOrderAction, usePeople } from '../hooks';
-import { InstallersPick, PersonSelect, peopleWith } from '../PeoplePick';
+import { MultiPick, PersonSelect, peopleWith } from '../PeoplePick';
 import { designerLabel, useDesigners } from '../NewOrderModal';
 import { DesignerModal } from '../../pages/Clients';
 
@@ -16,7 +16,7 @@ type Form = {
   designerId: number | null;
   managerId: number;
   measurerId: number | null;
-  constructorId: number | null;
+  constructorIds: number[];
   installerIds: number[];
   measureDate: string;
   installDate: string;
@@ -34,7 +34,7 @@ const fromCard = (o: OfficeCard): Form => ({
   designerId: o.designer?.id ?? null,
   managerId: o.managerId,
   measurerId: o.measurerId,
-  constructorId: o.constructorId,
+  constructorIds: o.constructorIds,
   installerIds: o.installerIds,
   measureDate: o.measureDate ?? '',
   installDate: o.installDate ?? '',
@@ -159,13 +159,13 @@ export function MainTab({ o }: { o: OfficeCard }) {
             Замірник
             <PersonSelect people={people} roles={['Замірник']} value={f.measurerId} onChange={(v) => setF({ ...f, measurerId: v })} />
           </label>
-          <label className="f">
-            Конструктор
-            <PersonSelect people={people} roles={['Конструктор']} value={f.constructorId} onChange={(v) => setF({ ...f, constructorId: v })} />
-          </label>
+          <div className="f">
+            Конструктори
+            <MultiPick people={people} role="Конструктор" value={f.constructorIds} onChange={(v) => setF({ ...f, constructorIds: v })} />
+          </div>
           <div className="f">
             Монтажники
-            <InstallersPick people={people} value={f.installerIds} onChange={(v) => setF({ ...f, installerIds: v })} />
+            <MultiPick people={people} role="Монтажник" value={f.installerIds} onChange={(v) => setF({ ...f, installerIds: v })} />
           </div>
         </div>
         <H t="Дати" />

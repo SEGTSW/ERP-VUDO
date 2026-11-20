@@ -98,7 +98,7 @@ export interface OrderRow {
   statusSince: string;
   measureDate: string | null;
   measurerId: number | null;
-  constructorId: number | null;
+  constructorIds: number[];
   installerIds: number[];
   readyDate: string | null;
   installDate: string | null;
@@ -132,7 +132,7 @@ export const CLIENT_COLS = (a: string) => `${a}.id, ${a}.name, ${a}.phone, ${a}.
 
 const ORDER_COLS = `o.id, o.num, o.client_id AS "clientId", o.address, o.manager_id AS "managerId", m.name AS "managerName",
   o.source, o.designer_id AS "designerId", o.status, o.status_since AS "statusSince", o.measure_date AS "measureDate",
-  o.measurer_id AS "measurerId", o.constructor_id AS "constructorId", o.installer_ids AS "installerIds",
+  o.measurer_id AS "measurerId", o.constructor_ids AS "constructorIds", o.installer_ids AS "installerIds",
   o.ready_date AS "readyDate", o.install_date AS "installDate", o.delivery, o.discount, o.discount_type AS "discountType",
   o.contract_date AS "contractDate", o.contract_price AS "contractPrice", o.closed_date AS "closedDate",
   o.closed_cost AS "closedCost", o.opex, o.refuse_reason AS "refuseReason", o.claim_text AS "claimText", o.comment,

@@ -36,7 +36,7 @@ export function TaskModal({
   const refresh = useInvalidatePlan();
   const people = usePeople().data ?? [];
   const office = isOffice(user);
-  const can = office || task.assigneeId === user.id;
+  const can = office || task.assigneeId === user.id || task.team.includes(user.id);
   // Дату заміру ставить менеджер або власник; замірник лише позначає виконання.
   const measure = task.stage === 'Замір';
   const canDates = can && (!measure || office);

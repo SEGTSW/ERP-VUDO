@@ -91,7 +91,8 @@ ordersRouter.get('/orders', async (req, res) => {
     let where = `NOT o.archived AND o.status NOT IN ('Відмова', 'Закрито') AND ${search}`;
     if (q.mine === '1') {
       params.push(u.id);
-      where += ` AND EXISTS (SELECT 1 FROM plan_tasks t WHERE t.order_id = o.id AND t.assignee_id = $${params.length})`;
+      where += ` AND EXISTS (SELECT 1 FROM plan_tasks t WHERE t.order_id = o.id AND t.assignee_id = $${params.length})
+        OR $${params.length} = ANY(o.constructor_ids) OR $${params.length} = ANY(o.installer_ids))`;
     }
     res.json(execList(await fetchOrders(pool, where, params), u));
     return;
@@ -196,7 +197,7 @@ ordersRouter.post('/orders', requireOffice, async (req, res) => {
     );
     const o = r.rows[0]!;
     // План робіт — один на замовлення, створюється одразу зі зверненням
-    await makePlan(c, { id: o.id, status: 'Звернення', managerId: b.managerId, measurerId: null, constructorId: null, installerIds: [], measureDate: null });
+    await makePlan(c, { id: o.id, status: 'Звернення', managerId: b.managerId, measurerId: null, constructorIds: [], installerIds: [], measureDate: null });
     await writeLog(c, {
       userId: u.id,
       orderId: o.id,
@@ -229,7 +230,7 @@ const mainSchema = z.object({
   designerId: z.number().int().positive().nullable(),
   managerId: z.number().int().positive(),
   measurerId: z.number().int().positive().nullable(),
-  constructorId: z.number().int().positive().nullable(),
+  constructorIds: z.array(z.number().int().positive()).max(20),
   installerIds: z.array(z.number().int().positive()).max(20),
   measureDate: dateOrNull,
   installDate: dateOrNull,
@@ -253,7 +254,8 @@ ordersRouter.patch('/orders/:id', requireOffice, async (req, res) => {
     // Люди — лише зі списків з потрібною роллю; вимкнені — лише якщо вже були вибрані.
     await checkPerson(c, b.managerId, ['Менеджер', 'Адмін'], 'Менеджер', [o.managerId]);
     if (b.measurerId) await checkPerson(c, b.measurerId, ['Замірник'], 'Замірник', [o.measurerId]);
-    if (b.constructorId) await checkPerson(c, b.constructorId, ['Конструктор'], 'Конструктор', [o.constructorId]);
+    const constructors = [...new Set(b.constructorIds)];
+    for (const x of constructors) await checkPerson(c, x, ['Конструктор'], 'Конструктори', o.constructorIds);
     const installers = [...new Set(b.installerIds)];
     for (const x of installers) await checkPerson(c, x, ['Монтажник'], 'Монтажники', o.installerIds);
 
@@ -273,15 +275,15 @@ ordersRouter.patch('/orders/:id', requireOffice, async (req, res) => {
 
     await c.query(
       `UPDATE orders SET client_id = $2, address = $3, source = $4, designer_id = $5, manager_id = $6, measurer_id = $7,
-              constructor_id = $8, installer_ids = $9, measure_date = $10, install_date = $11, ready_date = $12,
+              constructor_ids = $8, installer_ids = $9, measure_date = $10, install_date = $11, ready_date = $12,
               delivery = $13, discount = $14, discount_type = $15, comment = $16
         WHERE id = $1`,
-      [id, b.clientId, b.address, b.source, designerId, b.managerId, b.measurerId, b.constructorId, installers,
+      [id, b.clientId, b.address, b.source, designerId, b.managerId, b.measurerId, constructors, installers,
         b.measureDate, b.installDate, b.readyDate, b.delivery, b.discount, b.discountType, b.comment],
     );
 
     // Журнал: «поле: було → стало». Гроші — окремим записом (папка «Фінанси»).
-    const names = await namesOf(c, [o.managerId, b.managerId, o.measurerId, b.measurerId, o.constructorId, b.constructorId, ...o.installerIds, ...installers]);
+    const names = await namesOf(c, [o.managerId, b.managerId, o.measurerId, b.measurerId, ...o.constructorIds, ...constructors, ...o.installerIds, ...installers]);
     const nm = (x: number | null) => (x ? (names.get(x) ?? '—') : '—');
     const clientName = async (x: number | null) =>
       x ? ((await c.query<{ name: string; company: string | null }>('SELECT name, company FROM clients WHERE id = $1', [x])).rows[0] ?? null) : null;
@@ -294,7 +296,7 @@ ordersRouter.patch('/orders/:id', requireOffice, async (req, res) => {
       diffLine('Дизайнер', od ? designerLabel(od) : null, nd ? designerLabel(nd) : null),
       diffLine('Менеджер', nm(o.managerId), nm(b.managerId)),
       diffLine('Замірник', nm(o.measurerId), nm(b.measurerId)),
-      diffLine('Конструктор', nm(o.constructorId), nm(b.constructorId)),
+      diffLine('Конструктори', o.constructorIds.map(nm).join(', '), constructors.map(nm).join(', ')),
       people,
       diffLine('Дата заміру', o.measureDate && fmtDate(o.measureDate), b.measureDate && fmtDate(b.measureDate)),
       diffLine('Монтаж — обіцяли клієнту', o.installDate && fmtDate(o.installDate), b.installDate && fmtDate(b.installDate)),
@@ -312,7 +314,7 @@ ordersRouter.patch('/orders/:id', requireOffice, async (req, res) => {
       status: o.status,
       managerId: b.managerId,
       measurerId: b.measurerId,
-      constructorId: b.constructorId,
+      constructorIds: constructors,
       installerIds: installers,
     });
     if (updated) plain.push(`оновлено відповідальних у плані: ${updated}`);

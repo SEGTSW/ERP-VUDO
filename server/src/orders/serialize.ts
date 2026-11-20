@@ -8,6 +8,7 @@ import type { Db } from '../db.js';
 import { visibleLogSql } from '../audit.js';
 import type { User } from '../users.js';
 import { compute, ownerFigures, taskSchedule, type OrderAgg } from './repo.js';
+import { stageTeam } from './plan.js';
 import { orderFacts } from '../finance/cash.js';
 import { withEffectiveOpex } from '../finance/opex.js';
 
@@ -118,7 +119,7 @@ export function execList(orders: OrderAgg[], me: User) {
     address: o.address,
     status: o.status,
     itemNames: o.items.map((i) => i.name),
-    myStages: o.tasks.filter((t) => t.assigneeId === me.id && t.progress < 100).map((t) => t.stage),
+    myStages: o.tasks.filter((t) => (t.assigneeId === me.id || stageTeam(o, t.stage).includes(me.id)) && t.progress < 100).map((t) => t.stage),
     installDate: o.installDate,
   }));
 }
@@ -134,7 +135,7 @@ async function comments(db: Db, orderId: number) {
 
 function tasksView(o: OrderAgg) {
   const sch = taskSchedule(o);
-  return o.tasks.map((t) => ({ ...t, sched: sch.get(t.id)! }));
+  return o.tasks.map((t) => ({ ...t, team: stageTeam(o, t.stage), sched: sch.get(t.id)! }));
 }
 
 /** Останній день етапу «Монтаж» за планом працівників (підказка біля дати монтажу). */
@@ -187,7 +188,7 @@ export async function officeCard(db: Db, o: OrderAgg, s: Settings, me: User) {
     designer,
     measureDate: o.measureDate,
     measurerId: o.measurerId,
-    constructorId: o.constructorId,
+    constructorIds: o.constructorIds,
     installerIds: o.installerIds,
     readyDate: o.readyDate,
     installDate: o.installDate,
@@ -249,7 +250,7 @@ export async function execCard(db: Db, o: OrderAgg, me: User) {
     files: o.files.filter((f) => f.category !== 'spec').map(fileView),
     comments: await comments(db, o.id),
     tasks: tasksView(o),
-    myStages: o.tasks.filter((t) => t.assigneeId === me.id).map((t) => t.stage),
+    myStages: o.tasks.filter((t) => t.assigneeId === me.id || stageTeam(o, t.stage).includes(me.id)).map((t) => t.stage),
     issues: await openIssues(db, o.id),
     reserved: await reserved(db, o.id),
   };

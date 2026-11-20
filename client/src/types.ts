@@ -155,6 +155,8 @@ export interface PlanTask {
   days: number | null;
   progress: number;
   comment: string | null;
+  /** Усі закріплені за етапом у картці (конструктори / монтажники). */
+  team: number[];
   sched: TaskSchedule;
 }
 
@@ -174,7 +176,7 @@ export interface OfficeCard {
   designer: { id: number; name: string; company: string | null; phone: string | null; bonusPct: number } | null;
   measureDate: string | null;
   measurerId: number | null;
-  constructorId: number | null;
+  constructorIds: number[];
   installerIds: number[];
   readyDate: string | null;
   installDate: string | null;

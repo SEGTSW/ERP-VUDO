@@ -160,7 +160,7 @@ export async function moveStatus(
     status: to,
     managerId: o.managerId,
     measurerId: fields.some((f) => f.key === 'measurerId') ? v.measurerId! : o.measurerId,
-    constructorId: o.constructorId,
+    constructorIds: o.constructorIds,
     installerIds: fields.some((f) => f.key === 'installerIds') ? v.installerIds! : o.installerIds,
     measureDate: fields.some((f) => f.key === 'measureDate') ? v.measureDate! : o.measureDate,
   };
