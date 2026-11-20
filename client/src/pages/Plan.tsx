@@ -55,7 +55,13 @@ export function Plan() {
   const planned = filtered.filter((t) => t.sched.planned);
   const unplanned = filtered.filter((t) => !t.sched.planned && t.progress < 100);
   // Замір сюди не потрапляє: його дату ставить менеджер
-  const mineUnpl = all.filter((t) => (t.assigneeId === user.id || t.team.includes(user.id)) && t.stage !== 'Замір' && !t.sched.planned && t.progress < 100);
+  // Адмін бачить нагадування про всі незаплановані етапи всіх замовлень, решта — лише про свої
+  const admin = user.roles.includes('Адмін');
+  const mineUnpl = all.filter(
+    (t) =>
+      (admin || t.assigneeId === user.id || t.team.includes(user.id)) &&
+      t.stage !== 'Замір' && !t.sched.planned && t.progress < 100 && t.orderStatus !== 'Закрито',
+  );
 
   // Групи: за виробами (за замовчуванням) або за відповідальними
   const groups = useMemo(() => {
@@ -245,7 +251,7 @@ export function Plan() {
       </div>
       {!!mineUnpl.length && (
         <div className="mine">
-          <b>Вкажіть, скільки днів займуть ваші етапи ({mineUnpl.length}):</b>
+          <b>{admin ? 'Етапи без плану' : 'Вкажіть, скільки днів займуть ваші етапи'} ({mineUnpl.length}):</b>
           {mineUnpl.map((t) => (
             <button key={t.id} type="button" className="btn sm pri" onClick={() => setOpen(t)}>
               №{t.orderNum} · {t.clientName} · {t.stage}
