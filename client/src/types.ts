@@ -61,6 +61,7 @@ export interface OrderListItem {
   createdDate: string;
   client: { id: number; name: string; phone: string | null };
   address: string | null;
+  designer: { name: string; company: string | null } | null;
   status: Status;
   statusSince: string;
   late: number;

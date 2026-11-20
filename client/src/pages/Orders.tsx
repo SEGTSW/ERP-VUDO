@@ -98,6 +98,7 @@ function OfficeOrders() {
               <th>Клієнт</th>
               <th>Адреса</th>
               <th>Статус</th>
+              <th>Дизайнер</th>
               <th className="r">Ціна</th>
               <th className="r">Оплачено</th>
               <th className="r">Борг</th>
@@ -116,6 +117,16 @@ function OfficeOrders() {
                 <td>
                   <StatusPill s={o.status} />
                   {!!o.late && <div className="late">прострочено на {o.late} дн.</div>}
+                </td>
+                <td>
+                  {o.designer ? (
+                    <>
+                      <div>{o.designer.name}</div>
+                      {o.designer.company && <small className="muted">{o.designer.company}</small>}
+                    </>
+                  ) : (
+                    '—'
+                  )}
                 </td>
                 <td className="r num">{o.price ? money(o.price) : '—'}</td>
                 <td className="r num">{o.paid ? money(o.paid) : '—'}</td>

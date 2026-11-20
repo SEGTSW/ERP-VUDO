@@ -93,6 +93,7 @@ export async function officeList(db: Db, orders: OrderAgg[], s: Settings) {
       createdDate: o.createdDate,
       client: { id: o.client.id, name: o.client.name, phone: o.client.phone },
       address: o.address,
+      designer: o.source === 'дизайнер' && o.designer ? { name: o.designer.name, company: o.designer.company } : null,
       status: o.status,
       statusSince: o.statusSince,
       late,
