@@ -370,3 +370,19 @@ describe('список замовлень', () => {
     expect((await t.get('/api/orders')).body).toHaveLength(1);
   });
 });
+
+describe('видалення замовлення', () => {
+  it('адмін видаляє замовлення з усім; нумерація продовжується; менеджеру не можна', async () => {
+    const { ids, m } = await team();
+    const a = await newOrder(m, ids.iryna, '+380671112233', 'Олена Петренко');
+    const b = await newOrder(m, ids.iryna, '+380509998877', 'Ігор Бойко');
+    expect((await m.del(`/api/orders/${b.id}`)).status).toBe(403);
+    const boss = await loginAs('admin');
+    expect((await boss.del(`/api/orders/${b.id}`)).status).toBe(200);
+    expect((await boss.get(`/api/orders/${b.id}`)).status).toBe(404);
+    expect((await boss.get('/api/orders')).body.map((o: { id: number }) => o.id)).toEqual([a.id]);
+    expect((await logTexts()).at(-1)).toBe('Видалено замовлення №2 (Ігор Бойко)');
+    const c = await newOrder(m, ids.iryna, '+380631234567', 'Анна Мельник');
+    expect((await m.get(`/api/orders/${c.id}`)).body.num).toBe('2');
+  });
+});

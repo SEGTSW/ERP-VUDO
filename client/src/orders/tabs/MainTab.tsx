@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { SOURCES, daysBetween, fmtDate, money } from '@vudo/shared';
-import { api } from '../../api';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { SOURCES, daysBetween, fmtDate, isOwner, money } from '@vudo/shared';
+import { api, errorText } from '../../api';
+import { useMe } from '../../session';
+import { useToast } from '../../ui/toast';
 import type { ClientRow, OfficeCard } from '../../types';
 import { ConfirmButton } from '../../ui/common';
-import { useOrderAction, usePeople } from '../hooks';
+import { useDrawer, useOrderAction, usePeople } from '../hooks';
 import { MultiPick, PersonSelect, peopleWith } from '../PeoplePick';
 import { designerLabel, useDesigners } from '../NewOrderModal';
 import { DesignerModal } from '../../pages/Clients';
@@ -68,6 +70,20 @@ export function MainTab({ o }: { o: OfficeCard }) {
       }),
     'Збережено',
   );
+  const { user } = useMe();
+  const { close } = useDrawer();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const remove = useMutation({
+    mutationFn: () => api.del(`/orders/${o.id}`),
+    onSuccess: () => {
+      close();
+      qc.removeQueries({ queryKey: ['order', o.id] });
+      for (const k of ['orders', 'plan', 'clients', 'client', 'log', 'myday']) void qc.invalidateQueries({ queryKey: [k] });
+      toast(`Замовлення №${o.num} видалено`);
+    },
+    onError: (e) => toast(errorText(e), true),
+  });
   const archive = useOrderAction(o.id, () => api.post<OfficeCard>(`/orders/${o.id}/archive`, { archived: !o.archived }), o.archived ? 'Повернуто з архіву' : 'Перенесено в архів');
 
   // Ціна з урахуванням введених (ще не збережених) доставки й знижки
@@ -229,7 +245,12 @@ export function MainTab({ o }: { o: OfficeCard }) {
           onChange={(e) => setF({ ...f, comment: e.target.value })}
         />
       </div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+        {isOwner(user) && (
+          <ConfirmButton className="btn sm warn" confirmText="Видалити назавжди?" disabled={remove.isPending} onConfirm={() => remove.mutate()}>
+            Видалити
+          </ConfirmButton>
+        )}
         {o.archived ? (
           <button type="button" className="btn sm" onClick={() => archive.mutate(undefined)}>
             Повернути з архіву

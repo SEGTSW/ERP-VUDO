@@ -37,6 +37,7 @@ export async function loginAs(login: string, password = PASS) {
     get: (url: string) => agent.get(url),
     post: (url: string, body?: object) => agent.post(url).set('X-VUDO', '1').send(body ?? {}),
     patch: (url: string, body?: object) => agent.patch(url).set('X-VUDO', '1').send(body ?? {}),
+    del: (url: string) => agent.delete(url).set('X-VUDO', '1'),
   };
 }
 

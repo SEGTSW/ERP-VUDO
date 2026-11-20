@@ -234,3 +234,23 @@ describe('склад залишків (8А.4)', () => {
     expect((await m.get('/api/log?folder=stock')).body.entries.length).toBeGreaterThanOrEqual(4);
   });
 });
+
+describe('План: усі закріплені бачать етап', () => {
+  it('кожен вибраний монтажник і конструктор бачить етап і може вказати дні', async () => {
+    const { o, card, m, ids } = await setup();
+    await makeUser('maks', ['Конструктор'], { name: 'Макс Бондар' }).then((x) => Object.assign(ids, { maks: x }));
+    const all = ids as typeof ids & { maks: number };
+    await m.patch(`/api/orders/${o.id}`, {
+      clientId: card.client.id, address: 'Київ', source: 'сайт', designerId: null, managerId: ids.iryna, measurerId: null,
+      constructorIds: [ids.maria, all.maks], installerIds: [ids.taras, ids.oleh], measureDate: null, installDate: null, readyDate: null,
+      delivery: 0, discount: 0, discountType: 'грн', comment: '',
+    });
+    for (const [login, stage, uid] of [['taras', 'Монтаж', ids.taras], ['oleh', 'Монтаж', ids.oleh], ['maria', 'Конструктив', ids.maria], ['maks', 'Конструктив', all.maks]] as const) {
+      const s = await loginAs(login);
+      const t = (await s.get('/api/plan')).body.tasks.find((x: { stage: string }) => x.stage === stage);
+      expect(t.team).toContain(uid);
+      const r = await s.patch(`/api/plan/tasks/${t.id}`, { days: 2, startDate: today, progress: 0, comment: '' });
+      expect(r.status, `${login}: ${JSON.stringify(r.body)}`).toBe(200);
+    }
+  });
+});

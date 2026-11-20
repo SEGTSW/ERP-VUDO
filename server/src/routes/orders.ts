@@ -19,7 +19,10 @@ import {
 import type pg from 'pg';
 import { pool, tx } from '../db.js';
 import { badRequest, notFound } from '../errors.js';
-import { me, requireOffice } from '../auth/middleware.js';
+import { me, requireOffice, requireOwner } from '../auth/middleware.js';
+import { unlink } from 'node:fs/promises';
+import path from 'node:path';
+import { config } from '../config.js';
 import { diffLine, writeLog } from '../audit.js';
 import { getSettings } from '../settings.js';
 import { DESIGNER, clientSchema, designerLabel, findByPhone, insertClient, validateClient } from '../clients.js';
@@ -324,6 +327,34 @@ ordersRouter.patch('/orders/:id', requireOffice, async (req, res) => {
     await logPriceAfterContract(c, o, s, before, u.id);
   });
   res.json(await card(req, id));
+});
+
+/**
+ * Видалити замовлення назавжди (лише адмін): разом з виробами, оплатами, рухами каси, файлами, коментарями, планом і журналом.
+ * Склад і рахунки до оплати лишаються, просто без прив'язки. Якщо видалено останні номери — нумерація продовжиться з найбільшого наявного.
+ */
+ordersRouter.delete('/orders/:id', requireOwner, async (req, res) => {
+  const id = idOf(req.params.id);
+  const u = me(req);
+  const keys = await tx(async (c) => {
+    const o = await lockOrder(c, id);
+    const files = await c.query<{ storage_key: string }>('SELECT storage_key FROM order_files WHERE order_id = $1', [id]);
+    await c.query('UPDATE stock_items SET from_order_id = NULL WHERE from_order_id = $1', [id]);
+    await c.query('UPDATE stock_items SET res_order_id = NULL WHERE res_order_id = $1', [id]);
+    await c.query('UPDATE payables SET order_id = NULL WHERE order_id = $1', [id]);
+    for (const t of ['cash_ops', 'issues', 'plan_tasks', 'order_comments', 'order_files', 'payments', 'items', 'audit_log']) {
+      await c.query(`DELETE FROM ${t} WHERE order_id = $1`, [id]);
+    }
+    await c.query('DELETE FROM orders WHERE id = $1', [id]);
+    await c.query(
+      `SELECT setval('order_num_seq', greatest(coalesce((SELECT max(num::bigint) FROM orders WHERE num ~ '^\\d+$'), 0), 1),
+                     EXISTS (SELECT 1 FROM orders WHERE num ~ '^\\d+$'))`,
+    );
+    await writeLog(c, { userId: u.id, folder: 'order', text: `Видалено замовлення №${o.num} (${o.client.name})` });
+    return files.rows.map((f) => f.storage_key);
+  });
+  await Promise.all(keys.map((k) => unlink(path.join(config.uploadDir, k)).catch(() => {})));
+  res.json({ ok: true });
 });
 
 ordersRouter.post('/orders/:id/archive', requireOffice, async (req, res) => {
