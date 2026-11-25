@@ -291,6 +291,77 @@ describe('імпорт з Excel (10.1, 10.2)', () => {
   });
 });
 
+describe('договори', () => {
+  it('лише власник: картка, файл, імпорт без дублів, експорт', async () => {
+    const { a } = await setup();
+    const ents = (await a.get('/api/contracts')).body.entities;
+    expect(ents).toHaveLength(3);
+    const entityId = ents[0].id;
+    const { id } = (await a.post('/api/contracts', { entityId, counterparty: 'Тех', num: '№1', signedOn: '2026-10-08', status: 'Діючий' })).body;
+    expect((await a.agent.put(`/api/contracts/${id}`).set('X-VUDO', '1').send({ entityId, counterparty: 'Тех', num: '№2', scanUrl: 'javascript:x' })).status).toBe(400);
+    expect((await a.agent.put(`/api/contracts/${id}`).set('X-VUDO', '1').send({ entityId, counterparty: 'Тех', num: '№2' })).status).toBe(200);
+    expect((await a.agent.post(`/api/contracts/${id}/files`).set('X-VUDO', '1').attach('files', Buffer.from('%PDF-1'), 'договір.pdf')).status).toBe(201);
+    let row = (await a.get('/api/contracts')).body.rows[0];
+    expect(row).toMatchObject({ num: '№2', signedOn: null, files: [{ name: 'договір.pdf' }] });
+    const fid = row.files[0].id;
+    expect((await a.get(`/api/contracts/files/${fid}`)).status).toBe(200);
+    const m = await loginAs('iryna');
+    for (const u of ['/api/contracts', `/api/contracts/files/${fid}`, '/api/export/contracts']) expect((await m.get(u)).status).toBe(403);
+    expect((await a.del(`/api/contracts/files/${fid}`)).status).toBe(200);
+    const ExcelJS = (await import('exceljs')).default;
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Аркуш1');
+    ws.addRow(['ТОВ', 'Контрагент', 'Відповідальний ', 'Предмет договору', 'Сума договору', 'Номер договору ', 'Дата підписання', 'Дата завершення', 'Діючий/завершений', 'ПРИМІТКИ  (історія)', 'Відсканований договір ']);
+    ws.addRow(['ТОВ "ВУДО"']);
+    ws.addRow([null, 'Вибір', 'ЄД', 'Купівля', '65000,05 грн.', '№7', new Date(Date.UTC(2026, 9, 22)), '31.12.2026 до виконання', 'Діючий ', 'прим', { text: 'a.pdf', hyperlink: 'https://example.com/a' }]);
+    const buf = Buffer.from(await wb.xlsx.writeBuffer());
+    const up = () => a.agent.post(`/api/contracts/import/${entityId}`).set('X-VUDO', '1').attach('files', buf, 'd.xlsx');
+    expect((await up()).body).toEqual({ added: 1, duplicates: 0 });
+    expect((await up()).body).toEqual({ added: 0, duplicates: 1 });
+    row = (await a.get('/api/contracts')).body.rows.find((x: { counterparty: string }) => x.counterparty === 'Вибір');
+    expect(row).toMatchObject({ responsible: 'ЄД', amountText: '65000,05 грн.', num: '№7', signedOn: '2026-10-22', status: 'Діючий', note: 'прим', scanUrl: 'https://example.com/a' });
+  });
+});
+
+describe('P&L з файлу замовника', () => {
+  it('факт, «До», примітки: місяці з фактом беруть дані з файлу до копійки; можна повернути облік', async () => {
+    const { a, o } = await setup();
+    await a.post('/api/finance/cash', { ...expense(o.id, 4000), date: '2026-08-10' });
+    const ExcelJS = (await import('exceljs')).default;
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Аркуш 1');
+    for (const r of [
+      [null, 'До', '07.2026', '09.2026', '12.2027'],
+      ['Дохід ', 100, 500.4, 770, 900],
+      [null, null, 148.5, 947.41],
+      ['Витрати', -60, 414.29, 550, 600],
+      [null, 21.75, 75.48, 299.49],
+      ['Майбутні витрати закриті', null, 0, 321.5],
+      ['Адміністративні витрати', -5, -23, -23, -23],
+      [null, null, -18.25, -40.77],
+      ['Оборотні кошти ', null, null, null, 'Купівля буса'],
+      [null, null, null, null, -300],
+      ['Інвестиції +', 7, 134.1],
+      ['Позика', null, null, 124.7],
+    ]) ws.addRow(r);
+    const buf = Buffer.from(await wb.xlsx.writeBuffer());
+    expect((await a.agent.post('/api/finance/pnl/import').set('X-VUDO', '1').attach('file', buf, 'pnl.xlsx')).status).toBe(200);
+    const p = (await a.get('/api/finance/pnl?year=2026')).body;
+    expect(p.fixed.map((x: { month: string }) => x.month)).toEqual(['2026-07', '2026-08', '2026-09']);
+    expect(p.fact['2026-07']).toEqual({ income: 148.5, orderCost: -75.48, admin: -18.25, invPlus: 134.1, net: 188.87 });
+    expect(p.fact['2026-08']).toEqual({ net: 0 });
+    expect(p.fact['2026-09']).toEqual({ income: 947.41, orderCost: -620.99, admin: -40.77, loan: 124.7, net: 410.35 });
+    expect(p.futureClosed).toEqual({ '2026-09': 321.5 });
+    expect(p.before).toEqual({ plan: { income: 100, orderCost: -60, admin: -5, invPlus: 7 }, fact: { orderCost: 21.75 } });
+    const p27 = (await a.get('/api/finance/pnl?year=2027')).body;
+    expect(p27.plan['2027-12']).toEqual({ income: 900, orderCost: 600, admin: 23, working: 300 });
+    expect(p27.notes).toEqual([{ month: '2027-12', line: 'working', text: 'Купівля буса' }]);
+    expect(p27.before).toBe(null);
+    expect((await a.del('/api/finance/pnl/fixed/2026-08')).status).toBe(200);
+    expect((await a.get('/api/finance/pnl?year=2026')).body.fact['2026-08'].orderCost).toBe(-4000);
+  });
+});
+
 describe('позики і рахунки до оплати', () => {
   it('позика: надходження й повернення пишуться в облік; борг, прострочення; не більше боргу', async () => {
     const { a } = await setup();

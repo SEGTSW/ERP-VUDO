@@ -5,11 +5,10 @@
  */
 import { readFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
-import { LINE_KIND } from '@vudo/shared';
 import { pool, tx } from '../db.js';
 import { migrate } from '../migrate.js';
 import { writeLog } from '../audit.js';
-import { importCash, loadWorkbook, parseCashSheet, parsePnlSheet } from '../finance/import.js';
+import { importCash, importPnl, loadWorkbook, parseCashSheet, parsePnlSheet } from '../finance/import.js';
 
 const { values } = parseArgs({ options: { cash: { type: 'string' }, pnl: { type: 'string' } } });
 if (!values.cash && !values.pnl) {
@@ -38,18 +37,8 @@ if (values.cash) {
 if (values.pnl) {
   const wb = await loadWorkbook(await readFile(values.pnl));
   const p = parsePnlSheet(wb.worksheets[0]!);
-  await tx(async (c) => {
-    for (const x of p.cells) {
-      const amount = x.line !== 'futureClosed' && LINE_KIND[x.line] === 'mix' ? x.amount : Math.abs(x.amount);
-      await c.query(
-        `INSERT INTO pnl_plan (month, line, amount, updated_by) VALUES ($1, $2, $3, $4)
-         ON CONFLICT (month, line) DO UPDATE SET amount = EXCLUDED.amount, updated_at = now(), updated_by = EXCLUDED.updated_by`,
-        [x.month, x.line, amount, userId],
-      );
-    }
-    await writeLog(c, { userId, folder: 'fin', finScope: 'report', text: `P&L план: імпорт з файлу — ${p.cells.length} значень` });
-  });
+  await tx((c) => importPnl(c, p, userId));
   const ms = [...new Set(p.cells.map((x) => x.month))].sort();
-  console.log(`План P&L: ${p.cells.length} значень, місяці ${ms[0]} – ${ms.at(-1)}`);
+  console.log(`План P&L: ${p.cells.length} значень, місяці ${ms[0]} – ${ms.at(-1)}; факт за: ${[...p.factMonths, ...p.mergedMonths].sort().join(', ') || '—'}`);
 }
 await pool.end();

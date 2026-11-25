@@ -403,6 +403,30 @@ async function registrySheets(req: Request): Promise<Sheet[]> {
   ];
 }
 
+async function contractsSheets(req: Request): Promise<Sheet[]> {
+  const d = await internal<{ entities: { id: number; name: string }[]; rows: Row[] }>(req, '/contracts');
+  return d.entities.map((e) => ({
+    name: e.name.replace(/[\\/?*:[\]]/g, ' '),
+    cols: [
+      { h: 'Контрагент', k: 'counterparty' },
+      { h: 'Вид', k: 'kind' },
+      { h: 'Відповідальний', k: 'responsible' },
+      { h: 'Предмет договору', k: 'subject' },
+      { h: 'Сума договору', k: 'amountText' },
+      { h: 'Номер договору', k: 'num' },
+      { h: 'Дата підписання', k: 'signedOn', t: 'date' },
+      { h: 'Дата завершення', k: 'endsText' },
+      { h: 'Діючий/завершений', k: 'status' },
+      { h: 'Наявність оригіналу', k: 'original' },
+      { h: 'Походження договору', k: 'origin' },
+      { h: 'Примітки', k: 'note' },
+      { h: 'Файли', k: 'fileNames' },
+      { h: 'Скан', k: 'scanUrl' },
+    ],
+    rows: d.rows.filter((r) => r.entityId === e.id && !r.archived).map((r) => ({ ...r, fileNames: (r.files as Row[]).map((f) => f.name) })),
+  }));
+}
+
 async function planSheets(req: Request): Promise<Sheet[]> {
   const p = await internal<{ tasks: Row[] }>(req, '/plan');
   return [
@@ -574,6 +598,7 @@ const SECTIONS: Record<string, { file: string; build: (req: Request, u: User) =>
   designers: { file: 'Дизайнери', build: (r) => clientsSheets(r, 'designers') },
   finance: { file: 'Фінанси', build: financeSheets },
   registry: { file: 'Реєстр_платежів', build: registrySheets },
+  contracts: { file: 'Договори', build: contractsSheets },
   plan: { file: 'Планування', build: planSheets },
   myday: { file: 'Виїзди', build: mydaySheets },
   stock: { file: 'Склад', build: stockSheets },

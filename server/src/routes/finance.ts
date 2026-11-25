@@ -15,8 +15,8 @@ import { getSettings } from '../settings.js';
 import { balances, cashRows, loadArticles, orderFacts } from '../finance/cash.js';
 import { fetchOrder, ownerFigures, compute } from '../orders/repo.js';
 import { opexInfo } from '../finance/opex.js';
-import { importCash, loadWorkbook, parseCashSheet, parsePnlSheet } from '../finance/import.js';
-import { FIXED_PERIODS, FUTURE_CLOSED, FUTURE_CLOSED_LABEL, LINE_KIND, perMonth, planSigned, type PnlLine } from '@vudo/shared';
+import { BEFORE_MONTH, importCash, importPnl, loadWorkbook, parseCashSheet, parsePnlSheet } from '../finance/import.js';
+import { FIXED_PERIODS, FUTURE_CLOSED, FUTURE_CLOSED_LABEL, OPEX_LINES, perMonth, planSigned, type PnlLine } from '@vudo/shared';
 
 export const financeRouter = Router();
 financeRouter.use('/finance', requireOwner);
@@ -371,8 +371,36 @@ financeRouter.get('/finance/pnl', async (req, res) => {
     f.net = Math.round((f.net! + r.sum) * 100) / 100;
   }
   const future = await futureCosts(pool, months, rows, today);
+  // Місяці з фактом із файлу замовника: рядки і потік — з файлу
+  const fixed = await pool.query<{ month: string; note: string }>('SELECT month, note FROM pnl_fixed WHERE month LIKE $1 ORDER BY month', [`${year}-%`]);
+  const manual = await pool.query<{ month: string; line: string; kind: 'plan' | 'fact'; amount: number }>(
+    'SELECT month, line, kind, amount FROM pnl_fact WHERE month LIKE $1 OR month = $2',
+    [`${year}-%`, BEFORE_MONTH],
+  );
+  for (const { month } of fixed.rows) {
+    const f: Record<string, number> = { net: 0 };
+    for (const x of manual.rows.filter((r) => r.month === month)) {
+      f[x.line] = x.amount;
+      f.net = Math.round((f.net! + x.amount) * 100) / 100;
+    }
+    fact[month] = f;
+    const spent = (['orderCost', ...OPEX_LINES] as string[]).reduce((t, l) => t - Math.min(0, f[l] ?? 0), 0);
+    future[month]!.paid = Math.round(spent * 100) / 100;
+  }
+  // Колонка «До» — у першому році з файлу
+  const firstFixed = (await pool.query<{ m: string | null }>('SELECT min(month) AS m FROM pnl_fixed')).rows[0]!.m;
+  const pick = (kind: string) => Object.fromEntries(manual.rows.filter((r) => r.month === BEFORE_MONTH && r.kind === kind).map((r) => [r.line, r.amount]));
+  const before0 = firstFixed?.startsWith(String(year)) ? { plan: pick('plan'), fact: pick('fact') } : null;
+  const notes = await pool.query<{ month: string; line: string; text: string }>('SELECT month, line, text FROM pnl_notes WHERE month LIKE $1', [`${year}-%`]);
   // (20) Залишок = Σ усіх операцій до кінця місяця: стартовий — усе до 1 січня
-  const before = (await cashRows(pool, { to: `${year - 1}-12-31` })).reduce((s, r) => s + r.sum, 0);
+  const fixedBefore = await pool.query<{ month: string; s: number }>(
+    `SELECT f.month, coalesce((SELECT sum(x.amount) FROM pnl_fact x WHERE x.month = f.month), 0)::numeric AS s FROM pnl_fixed f WHERE f.month < $1`,
+    [`${year}-01`],
+  );
+  const fixedSet = new Set(fixedBefore.rows.map((x) => x.month));
+  const before =
+    (await cashRows(pool, { to: `${year - 1}-12-31` })).filter((r) => !fixedSet.has(r.date.slice(0, 7))).reduce((s, r) => s + r.sum, 0) +
+    fixedBefore.rows.reduce((t, x) => t + x.s, 0);
   const plan = await pool.query<{ month: string; line: string; amount: number }>(
     'SELECT month, line, amount FROM pnl_plan WHERE month LIKE $1',
     [`${year}-%`],
@@ -395,6 +423,9 @@ financeRouter.get('/finance/pnl', async (req, res) => {
     plan: planBy,
     future,
     futureClosed,
+    fixed: fixed.rows,
+    before: before0,
+    notes: notes.rows,
     opening: Math.round(before * 100) / 100,
     years: [...new Set([...years.rows.map((x) => x.y), Number(today.slice(0, 4))])].sort(),
     today,
@@ -425,6 +456,19 @@ financeRouter.put('/finance/pnl/plan', async (req, res) => {
     }
     const v = (x: number | null) => (x == null ? '—' : money(x));
     await writeLog(c, { userId: u.id, folder: 'fin', finScope: 'report', text: `${b.line === FUTURE_CLOSED ? `P&L ${b.month} · ${FUTURE_CLOSED_LABEL}` : `P&L план ${b.month} · ${lineLabel(b.line)}`}: ${v(old)} → ${v(b.amount)}` });
+  });
+  res.json({ ok: true });
+});
+
+/** Повернути місяцю факт з обліку замість факту з файлу. */
+financeRouter.delete('/finance/pnl/fixed/:month', async (req, res) => {
+  const month = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).parse(req.params.month);
+  const u = me(req);
+  await tx(async (c) => {
+    const r = await c.query('DELETE FROM pnl_fixed WHERE month = $1', [month]);
+    if (!r.rowCount) throw notFound('Факт цього місяця і так рахується з обліку.');
+    await c.query('DELETE FROM pnl_fact WHERE month = $1', [month]);
+    await writeLog(c, { userId: u.id, folder: 'fin', finScope: 'report', text: `P&L ${month}: факт знову рахується з обліку` });
   });
   res.json({ ok: true });
 });
@@ -534,7 +578,7 @@ financeRouter.post('/finance/fixed/to-plan', async (req, res) => {
     for (const m of months) {
       for (const [line, v] of byLine) {
         // План витрат вводиться без мінуса (знак визначає рядок)
-        const amount = Math.round(Math.abs(planSigned(line as PnlLine, v)));
+        const amount = Math.round(Math.abs(planSigned(line as PnlLine, v)) * 100) / 100;
         await c.query(
           `INSERT INTO pnl_plan (month, line, amount, updated_by) VALUES ($1, $2, $3, $4)
            ON CONFLICT (month, line) DO UPDATE SET amount = EXCLUDED.amount, updated_at = now(), updated_by = EXCLUDED.updated_by`,
@@ -606,24 +650,6 @@ financeRouter.post('/finance/pnl/import', async (req, res) => {
   } catch (e) {
     throw badRequest((e as Error).message);
   }
-  await tx(async (c) => {
-    for (const x of parsed.cells) {
-      const k = x.line === FUTURE_CLOSED ? 'out' : LINE_KIND[x.line];
-      // план витрат і доходів — без знака (знак визначає рядок), «Кредити» / «Позика» — зі знаком
-      const amount = k === 'mix' ? x.amount : Math.abs(x.amount);
-      await c.query(
-        `INSERT INTO pnl_plan (month, line, amount, updated_by) VALUES ($1, $2, $3, $4)
-         ON CONFLICT (month, line) DO UPDATE SET amount = EXCLUDED.amount, updated_at = now(), updated_by = EXCLUDED.updated_by`,
-        [x.month, x.line, amount, u.id],
-      );
-    }
-    const ms = [...new Set(parsed.cells.map((x) => x.month))].sort();
-    await writeLog(c, {
-      userId: u.id,
-      folder: 'fin',
-      finScope: 'report',
-      text: `P&L план: імпорт з файлу — ${parsed.cells.length} значень${ms.length ? ` (${ms[0]} – ${ms.at(-1)})` : ''}`,
-    });
-  });
+  await tx((c) => importPnl(c, parsed, u.id));
   res.json({ cells: parsed.cells.length, months: [...new Set(parsed.cells.map((x) => x.month))].sort() });
 });

@@ -54,6 +54,10 @@ export const CLIENT_TYPES = ['фізособа', 'юрособа', 'дизайн
 export const PAYMENT_TYPES = ['аванс', 'доплата', 'інше', 'повернення'] as const;
 export const PAYMENT_METHODS = ['готівка', 'картка', 'рахунок ТОВ', 'рахунок ФОП'] as const;
 
+/** Реєстр договорів. */
+export const CONTRACT_KINDS = ['договір', 'інший документ'] as const;
+export const CONTRACT_STATUSES = ['', 'Діючий', 'Завершений'] as const;
+
 export const PLAN_STAGES = ['Прорахунок', 'Замір', 'Конструктив', 'Збірка', 'Монтаж'] as const;
 export type PlanStage = (typeof PLAN_STAGES)[number];
 

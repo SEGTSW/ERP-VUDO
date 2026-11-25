@@ -10,7 +10,8 @@
  */
 import ExcelJS from 'exceljs';
 import type pg from 'pg';
-import { ART_TYPES, FUTURE_CLOSED, FUTURE_CLOSED_LABEL, PNL_LINES, type Account, type PnlLine } from '@vudo/shared';
+import { writeLog } from '../audit.js';
+import { ART_TYPES, FUTURE_CLOSED, FUTURE_CLOSED_LABEL, INVEST_LINES, LINE_KIND, PNL_LINES, planSigned, type Account, type PnlLine } from '@vudo/shared';
 
 type Cell = ExcelJS.CellValue;
 
@@ -185,33 +186,137 @@ const LINE_BY_NAME: Record<string, PlanLine> = (() => {
   return m;
 })();
 
-export function parsePnlSheet(ws: ExcelJS.Worksheet): { cells: { month: string; line: PlanLine; amount: number }[]; months: string[] } {
+/** Колонка «До» (до початку обліку) у pnl_fact. */
+export const BEFORE_MONTH = '0000-00';
+
+export interface PnlSheet {
+  /** План: як введено */
+  cells: { month: string; line: PlanLine; amount: number }[];
+  /** Факт зі знаком — лише для місяців, де у файлі заповнено факт доходу */
+  facts: { month: string; line: PnlLine; amount: number }[];
+  factMonths: string[];
+  /** Місяці між фактичними, для яких у файлі немає колонки: їх суми входять у сусідні колонки */
+  mergedMonths: string[];
+  before: { line: PnlLine; kind: 'plan' | 'fact'; amount: number }[];
+  notes: { month: string; line: PnlLine; text: string }[];
+  months: string[];
+}
+
+/**
+ * Файл P&L: рядок з назвою — план, рядок під ним без назви — факт. Місяці — у заголовку (ММ.РРРР), «До» — до початку обліку.
+ * «Витрати» і «Майбутні витрати закриті» у файлі без мінуса; факт витрат на замовлення в системі = обидва разом.
+ * Рядки інвестиційної діяльності мають один рядок: у місяцях з фактом він є і фактом.
+ */
+export function parsePnlSheet(ws: ExcelJS.Worksheet): PnlSheet {
   // Рядок з місяцями — той, де найбільше клітинок виду ММ.РРРР / дата
-  let best = { row: 0, months: new Map<number, string>() };
+  let best = { row: 0, months: new Map<number, string>(), before: 0 };
   ws.eachRow((row, i) => {
     const months = new Map<number, string>();
+    let before = 0;
     (row.values as Cell[]).forEach((v, k) => {
       const p = plain(v);
       let m: string | null = null;
       if (p instanceof Date) m = isoDate(p).slice(0, 7);
       else if (typeof p === 'string' && /^\d{2}\.\d{4}$/.test(p.trim())) m = `${p.trim().slice(3)}-${p.trim().slice(0, 2)}`;
+      else if (norm(str(p)) === 'до') before = k;
       if (m) months.set(k, m);
     });
-    if (months.size > best.months.size) best = { row: i, months };
+    if (months.size > best.months.size) best = { row: i, months, before };
   });
   if (best.months.size < 1) throw new Error('Не знайдено рядок з місяцями (ММ.РРРР).');
-  const cells: { month: string; line: PlanLine; amount: number }[] = [];
-  ws.eachRow((row, i) => {
-    if (i <= best.row) return;
-    const name = str(plain(row.getCell(1).value));
-    const line = LINE_BY_NAME[norm(name)];
-    if (!line || line === 'none') return;
+
+  // Рядки P&L: значення плану і (якщо під ним рядок без назви) факту
+  type Cells = Map<number, unknown>;
+  const read = (n: number): Cells => new Map([...best.months.keys(), ...(best.before ? [best.before] : [])].map((k) => [k, plain(ws.getRow(n).getCell(k).value)]));
+  const lines: { line: PlanLine; plan: Cells; fact: Cells | null }[] = [];
+  for (let i = best.row + 1; i <= ws.rowCount; i++) {
+    const line = LINE_BY_NAME[norm(str(plain(ws.getRow(i).getCell(1).value)))];
+    if (!line || line === 'none') continue;
+    const noName = i < ws.rowCount && !str(plain(ws.getRow(i + 1).getCell(1).value));
+    lines.push({ line, plan: read(i), fact: noName && line !== FUTURE_CLOSED ? read(i + 1) : null });
+  }
+  const r2 = (v: number) => Math.round(v * 100) / 100;
+  const val = (c: Cells | null, k: number) => {
+    const v = c ? num(c.get(k)) : null;
+    return v != null && v !== 0 ? r2(v) : null;
+  };
+
+  const income = lines.find((l) => l.line === 'income');
+  const isFact = (k: number) => val(income?.fact ?? null, k) != null;
+  const closed = lines.find((l) => l.line === FUTURE_CLOSED);
+  const invest: readonly string[] = INVEST_LINES;
+  const out: PnlSheet = { cells: [], facts: [], factMonths: [], mergedMonths: [], before: [], notes: [], months: [...best.months.values()] };
+  for (const [k, month] of best.months) if (isFact(k)) out.factMonths.push(month);
+  out.factMonths.sort();
+  for (const l of lines) {
     for (const [k, month] of best.months) {
-      const v = num(plain(row.getCell(k).value));
-      if (v != null && v !== 0) cells.push({ month, line, amount: Math.round(v * 100) / 100 });
+      const p = val(l.plan, k);
+      const f = val(l.fact, k);
+      if (p != null) out.cells.push({ month, line: l.line, amount: p });
+      // сума під рядком у майбутньому місяці — теж план (напр. «Купівля буса»)
+      else if (f != null && !isFact(k)) out.cells.push({ month, line: l.line, amount: f });
+      if (l.line === FUTURE_CLOSED) continue;
+      const raw = l.plan.get(k);
+      if (typeof raw === 'string' && raw.trim() && num(raw) == null) out.notes.push({ month, line: l.line, text: raw.trim().slice(0, 300) });
+      if (!isFact(k)) continue;
+      let sum = f ?? (invest.includes(l.line) ? p : null);
+      if (sum != null) sum = planSigned(l.line, sum);
+      if (l.line === 'orderCost') {
+        const c = val(closed?.plan ?? null, k);
+        if (c != null) sum = (sum ?? 0) - Math.abs(c);
+      }
+      if (sum != null) out.facts.push({ month, line: l.line, amount: r2(sum) });
     }
+    if (best.before && l.line !== FUTURE_CLOSED) {
+      const p = val(l.plan, best.before);
+      const f = val(l.fact, best.before);
+      if (p != null) out.before.push({ line: l.line, kind: 'plan', amount: p });
+      if (f != null) out.before.push({ line: l.line, kind: 'fact', amount: f });
+    }
+  }
+  if (out.factMonths.length) {
+    const [y, m] = out.factMonths[0]!.split('-').map(Number) as [number, number];
+    for (let n = 1; ; n++) {
+      const mm = new Date(Date.UTC(y, m - 1 + n, 1)).toISOString().slice(0, 7);
+      if (mm >= out.factMonths.at(-1)!) break;
+      if (!out.months.includes(mm)) out.mergedMonths.push(mm);
+    }
+  }
+  return out;
+}
+
+/** Записує план, факт, «До» і примітки з файлу. Місяці з фактом у файлі далі показують факт із файлу, а не з обліку. */
+export async function importPnl(c: pg.PoolClient, p: PnlSheet, userId: number): Promise<void> {
+  for (const x of p.cells) {
+    // план витрат і доходів — без знака (знак визначає рядок), «Кредити» / «Позика» — зі знаком
+    const amount = x.line !== FUTURE_CLOSED && LINE_KIND[x.line] === 'mix' ? x.amount : Math.abs(x.amount);
+    await c.query(
+      `INSERT INTO pnl_plan (month, line, amount, updated_by) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (month, line) DO UPDATE SET amount = EXCLUDED.amount, updated_at = now(), updated_by = EXCLUDED.updated_by`,
+      [x.month, x.line, amount, userId],
+    );
+  }
+  for (const [list, note] of [
+    [p.factMonths, ''],
+    [p.mergedMonths, 'У файлі немає окремої колонки: суми цього місяця — у сусідніх.'],
+  ] as const) {
+    for (const m of list) {
+      await c.query('DELETE FROM pnl_fact WHERE month = $1', [m]);
+      await c.query(`INSERT INTO pnl_fixed (month, note, created_by) VALUES ($1, $2, $3) ON CONFLICT (month) DO UPDATE SET note = EXCLUDED.note`, [m, note, userId]);
+    }
+  }
+  for (const x of p.facts) await c.query('INSERT INTO pnl_fact (month, line, amount) VALUES ($1, $2, $3)', [x.month, x.line, x.amount]);
+  if (p.before.length) await c.query('DELETE FROM pnl_fact WHERE month = $1', [BEFORE_MONTH]);
+  for (const x of p.before) await c.query('INSERT INTO pnl_fact (month, line, kind, amount) VALUES ($1, $2, $3, $4)', [BEFORE_MONTH, x.line, x.kind, x.amount]);
+  for (const x of p.notes) {
+    await c.query('INSERT INTO pnl_notes (month, line, text) VALUES ($1, $2, $3) ON CONFLICT (month, line) DO UPDATE SET text = EXCLUDED.text', [x.month, x.line, x.text]);
+  }
+  await writeLog(c, {
+    userId,
+    folder: 'fin',
+    finScope: 'report',
+    text: `P&L: імпорт з файлу — план ${p.cells.length} значень${p.factMonths.length ? `, факт за ${[...p.factMonths, ...p.mergedMonths].sort().join(', ')}` : ''}`,
   });
-  return { cells, months: [...best.months.values()] };
 }
 
 export async function loadWorkbook(buf: Buffer) {

@@ -1,7 +1,8 @@
 import { Fragment, useLayoutEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { FUTURE_CLOSED, FUTURE_CLOSED_LABEL, INVEST_LINES, OPEX_LINES, lineLabel, orderCostShown, planSigned, pnlDerived, type LineSums, type PnlLine } from '@vudo/shared';
+import { FUTURE_CLOSED, FUTURE_CLOSED_LABEL, INVEST_LINES, OPEX_LINES, kop, lineLabel, orderCostShown, planSigned, pnlDerived, type LineSums, type PnlLine } from '@vudo/shared';
 import { api, errorText } from '../api';
+import { ConfirmButton } from '../ui/common';
 import { useToast } from '../ui/toast';
 import { ImportButton } from './ImportButton';
 
@@ -12,19 +13,23 @@ interface PnlData {
   plan: Record<string, Record<string, number>>;
   future: Record<string, { paid: number; unpaid: number }>;
   futureClosed: Record<string, number>;
+  /** Місяці, де факт перенесено з файлу */
+  fixed: { month: string; note: string }[];
+  before: { plan: LineSums; fact: LineSums } | null;
+  notes: { month: string; line: string; text: string }[];
   opening: number;
   years: number[];
   today: string;
 }
 
 const MON = ['Січ', 'Лют', 'Бер', 'Кві', 'Тра', 'Чер', 'Лип', 'Сер', 'Вер', 'Жов', 'Лис', 'Гру'];
-const num = (v: number | null | undefined) => (v == null || v === 0 ? '' : Math.round(v).toLocaleString('uk-UA'));
+const num = (v: number | null | undefined) => (v == null || v === 0 ? '' : kop(v));
 const pct = (v: number | null) => (v == null ? '' : `${(Math.round(v * 10) / 10).toLocaleString('uk-UA')}%`);
 
 /** Клітинка плану: зберігається після виходу з поля; витрати — без мінуса. */
 function PlanCell({ value, onCommit, label }: { value: number | undefined; onCommit: (v: number | null) => void; label: string }) {
   const [t, setT] = useState<string | null>(null);
-  const shown = t ?? (value == null ? '' : String(value));
+  const shown = t ?? (value == null ? '' : kop(value));
   return (
     <input
       className="pin"
@@ -32,6 +37,7 @@ function PlanCell({ value, onCommit, label }: { value: number | undefined; onCom
       value={shown}
       placeholder="—"
       aria-label={label}
+      onFocus={(e) => e.target.select()}
       onChange={(e) => setT(e.target.value)}
       onBlur={() => {
         if (t == null) return;
@@ -57,6 +63,14 @@ export function PnlTab() {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['finance', 'pnl'] }),
     onError: (e) => toast(errorText(e), true),
   });
+  const unfix = useMutation({
+    mutationFn: (m: string) => api.del(`/finance/pnl/fixed/${m}`),
+    onSuccess: () => {
+      for (const k of ['finance', 'log']) void qc.invalidateQueries({ queryKey: [k] });
+      toast('Факт рахується з обліку');
+    },
+    onError: (e) => toast(errorText(e), true),
+  });
   const d = q.data;
   const wrap = useRef<HTMLDivElement>(null);
   // При відкритті таблиця прокручена так, щоб було видно поточний місяць
@@ -80,6 +94,12 @@ export function PnlTab() {
   // Факт рядка на екрані: витрати на замовлення — без закритих майбутніх витрат
   const shown = (k: PnlLine, m: string) => (k === 'orderCost' ? orderCostShown(F(m).orderCost, d.futureClosed[m]) : F(m)[k]);
 
+  const B = d.before;
+  const bc = (v: number | null | undefined, text?: string) => B && <td className={`r num ${(v ?? 0) < 0 ? 'neg' : ''}`}>{text ?? num(v)}</td>;
+  const bNet = B ? Object.values(B.plan).reduce<number>((t, v) => t + (v ?? 0), 0) : 0;
+  const isFixed = (m: string) => d.fixed.find((x) => x.month === m);
+  const noteOf = (m: string, k: string) => d.notes.find((x) => x.month === m && x.line === k)?.text;
+
   const base = (k: PnlLine) => (
     <Fragment key={k}>
       <tr className="pl">
@@ -87,14 +107,17 @@ export function PnlTab() {
           {lineLabel(k)}
           <small>план / факт</small>
         </th>
+        {bc(B?.plan[k])}
         {ms.map((m) => (
           <td key={m} className={cc(m)}>
             <PlanCell value={d.plan[m]?.[k]} label={`План ${lineLabel(k)} ${m}`} onCommit={(v) => save.mutate({ month: m, line: k, amount: v })} />
+            {noteOf(m, k) && <small className="muted" style={{ display: 'block', whiteSpace: 'normal', textAlign: 'right' }}>{noteOf(m, k)}</small>}
           </td>
         ))}
         <td className="r num">{num(tot((m) => planS(m)[k]))}</td>
       </tr>
       <tr className="fa">
+        {bc(B?.fact[k])}
         {ms.map((m) => (
           <td key={m} className={`r num ${cc(m)} ${(shown(k, m) ?? 0) < 0 ? 'neg' : ''}`}>
             {num(shown(k, m))}
@@ -112,6 +135,7 @@ export function PnlTab() {
           {label}
           <small>план / факт</small>
         </th>
+        {B && bc(isPct ? null : pnlDerived(B.plan)[key], isPct ? pct(pnlDerived(B.plan)[key]) : undefined)}
         {ms.map((m) => {
           const v = hasPlan(m) ? pnlDerived(planS(m))[key] : null;
           return (
@@ -123,6 +147,7 @@ export function PnlTab() {
         <td className="r num">{isPct ? '' : num(tot((m) => (hasPlan(m) ? pnlDerived(planS(m))[key] : 0)))}</td>
       </tr>
       <tr className="fa calc">
+        {B && <td />}
         {ms.map((m) => {
           const v = pnlDerived(F(m))[key];
           return (
@@ -140,7 +165,7 @@ export function PnlTab() {
   const sec = (t: string) => (
     <tr className="secrow">
       <th>{t}</th>
-      <td colSpan={13} style={{ background: 'var(--bg)' }} />
+      <td colSpan={B ? 14 : 13} style={{ background: 'var(--bg)' }} />
     </tr>
   );
   const futureRow = (label: string, hint: string, get: (m: string) => number, warn = false) => (
@@ -149,6 +174,7 @@ export function PnlTab() {
         {label}
         <small>{hint}</small>
       </th>
+      {B && <td />}
       {ms.map((m) => (
         <td key={m} className={`r num ${cc(m)} ${warn && get(m) > 0 ? 'neg' : ''}`}>
           {num(get(m))}
@@ -174,14 +200,28 @@ export function PnlTab() {
         <ImportButton kind="pnl" />
         <small className="muted">План вводиться в клітинки (витрати без мінуса), факт рахується з обліку.</small>
       </div>
+      {!!d.fixed.length && (
+        <div className="note" style={{ marginBottom: 12, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          Факт із файлу (не з обліку). Повернути факт з обліку:
+          {d.fixed.map((x) => (
+            <span key={x.month} title={x.note}>
+              <ConfirmButton className="mini" onConfirm={() => unfix.mutate(x.month)}>
+                {`${x.month.slice(5)}.${x.month.slice(0, 4)}${x.note ? ' (немає у файлі)' : ''}`}
+              </ConfirmButton>
+            </span>
+          ))}
+        </div>
+      )}
       <div className="tbl-wrap pnlwrap" ref={wrap}>
         <table className="pnl">
           <thead>
             <tr>
               <th>Рядок</th>
+              {B && <th className="r">До</th>}
               {ms.map((m) => (
                 <th key={m} className={`r ${cc(m)}`}>
                   {MON[Number(m.slice(5)) - 1]}
+                  {isFixed(m) && <small title={isFixed(m)!.note || 'Факт перенесено з файлу'}> · файл</small>}
                 </th>
               ))}
               <th className="r">Разом</th>
@@ -193,6 +233,7 @@ export function PnlTab() {
               <th>
                 Плановий дохід<small>вписується вручну</small>
               </th>
+              {bc(B?.plan.income)}
               {ms.map((m) => (
                 <td key={m} className={cc(m)}>
                   <PlanCell value={d.plan[m]?.income} label={`Плановий дохід ${m}`} onCommit={(v) => save.mutate({ month: m, line: 'income', amount: v })} />
@@ -204,6 +245,7 @@ export function PnlTab() {
               <th>
                 Дохід<small>факт</small>
               </th>
+              {bc(B?.fact.income)}
               {ms.map((m) => (
                 <td key={m} className={`r num ${cc(m)} ${(F(m).income ?? 0) < 0 ? 'neg' : ''}`}>
                   {num(F(m).income)}
@@ -217,6 +259,7 @@ export function PnlTab() {
                 {FUTURE_CLOSED_LABEL}
                 <small>вписується вручну, без мінуса</small>
               </th>
+              {B && <td />}
               {ms.map((m) => (
                 <td key={m} className={cc(m)}>
                   <PlanCell value={d.futureClosed[m]} label={`${FUTURE_CLOSED_LABEL} ${m}`} onCommit={(v) => (v != null && v < 0 ? toast('Вкажіть суму без мінуса.', true) : save.mutate({ month: m, line: FUTURE_CLOSED, amount: v }))} />
@@ -240,6 +283,7 @@ export function PnlTab() {
               <th>
                 Чистий грошовий потік<small>факт, усі операції</small>
               </th>
+              {bc(bNet)}
               {ms.map((m) => (
                 <td key={m} className={`r num ${cc(m)} ${(F(m).net ?? 0) < 0 ? 'neg' : ''}`}>
                   {num(F(m).net)}
@@ -251,6 +295,7 @@ export function PnlTab() {
               <th>
                 Залишок на кінець місяця<small>факт, усі каси</small>
               </th>
+              {bc(bNet)}
               {ms.map((m, i) => (
                 <td key={m} className={`r num ${cc(m)} ${balance[i]! < 0 ? 'neg' : ''}`}>
                   {m <= cur ? num(balance[i]) : ''}
@@ -267,7 +312,7 @@ export function PnlTab() {
         «Майбутні витрати закриті» — частина витрат на замовлення з обліку: факт витрат показується без неї, виручка рахується з обома.
         Майбутні витрати: «ще не закрито» — залишки з «Рахунків до оплати» (за місяцем строку; без строку — поточний місяць) і несплачені щомісячні /
         щотижневі постійні витрати; реєстр платежів сюди не додається.
-        План можна імпортувати з Excel: перший стовпець — назва рядка, у заголовку — місяці (ММ.РРРР).
+        Імпорт з Excel: перший стовпець — назва рядка, у заголовку — місяці (ММ.РРРР); рядок без назви під ним — факт. Місяці з фактом у файлі беруть факт із файлу.
       </div>
     </>
   );

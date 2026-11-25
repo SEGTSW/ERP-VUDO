@@ -1,6 +1,6 @@
 import { Fragment, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ACCOUNTS, fmtDate, kyivToday, money } from '@vudo/shared';
+import { ACCOUNTS, fmtDate, kyivToday, moneyKop as money } from '@vudo/shared';
 import { api, errorText } from '../api';
 import { useDrawer } from '../orders/hooks';
 import { ConfirmButton, Modal, WarnBox } from '../ui/common';

@@ -1,6 +1,6 @@
 import { Fragment, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { PAYMENT_METHODS, addDays, fmtDate, kyivToday, money, type Status } from '@vudo/shared';
+import { PAYMENT_METHODS, addDays, fmtDate, kyivToday, moneyKop as money, type Status } from '@vudo/shared';
 import { api, errorText } from '../api';
 import { useDrawer } from '../orders/hooks';
 import { useManagers } from '../pages/Orders';

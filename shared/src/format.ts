@@ -11,6 +11,12 @@ export function money(n: number | null | undefined): string {
   return `${moneyFmt.format(round2(n ?? 0))} грн`;
 }
 
+const kopFmt = new Intl.NumberFormat('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+/** Сума завжди з копійками, без «грн» (облік, P&L). */
+export const kop = (n: number | null | undefined): string => kopFmt.format(round2(n ?? 0));
+/** Сума завжди з копійками (облік, P&L). */
+export const moneyKop = (n: number | null | undefined): string => `${kop(n)} грн`;
+
 /** Частини дати/часу в київському часовому поясі. */
 function kyivParts(d: Date) {
   const parts = new Intl.DateTimeFormat('en-GB', {

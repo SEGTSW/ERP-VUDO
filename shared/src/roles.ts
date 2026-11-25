@@ -44,7 +44,7 @@ export function moneyAccess(u: RoleHolder): MoneyAccess {
 
 export type Section =
   | 'myday' | 'orders' | 'crm' | 'plan' | 'stock' | 'clients' | 'finance'
-  | 'stats' | 'time' | 'kb' | 'notes' | 'settings';
+  | 'contracts' | 'stats' | 'time' | 'kb' | 'notes' | 'settings';
 
 export interface NavItem {
   key: Section;
@@ -62,6 +62,7 @@ export function navFor(u: RoleHolder): NavItem[] {
       { key: 'myday', label: 'Виїзди' },
       { key: 'clients', label: 'Клієнти' },
       { key: 'finance', label: isOwner(u) ? 'Фінанси' : 'Борги' },
+      ...(isOwner(u) ? [{ key: 'contracts' as const, label: 'Договори' }] : []),
       { key: 'stats', label: 'Аналітика' },
       { key: 'time', label: 'Табель' },
       { key: 'kb', label: 'База знань' },

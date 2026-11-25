@@ -14,7 +14,7 @@ const STAGE: Record<Section, number> = {
   stats: 4,
   kb: 5,
   time: 5,
-  settings: 1,
+  contracts: 2, settings: 1,
 };
 
 export function Stub({ section }: { section: Section }) {

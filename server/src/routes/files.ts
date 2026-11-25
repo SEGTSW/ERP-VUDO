@@ -2,7 +2,7 @@
  * Файли замовлення (ТЗ розділи 1, 6.4): до 50 МБ на файл, кілька за раз, дозволені типи.
  * Права на «Прорахунки / специфікації» (spec) перевіряє сервер — і при додаванні, і при завантаженні.
  */
-import { Router, type Request } from 'express';
+import { Router, type Request, type Response } from 'express';
 import multer from 'multer';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
@@ -49,7 +49,7 @@ const upload = multer({
 }).array('files', 20);
 
 /** Обгортка multer: зрозумілі тексти помилок. */
-function receive(req: Request, res: Parameters<typeof upload>[1]): Promise<void> {
+export function receive(req: Request, res: Parameters<typeof upload>[1]): Promise<void> {
   return new Promise((resolve, reject) =>
     upload(req, res, (err: unknown) => {
       if (!err) return resolve();
@@ -62,6 +62,19 @@ function receive(req: Request, res: Parameters<typeof upload>[1]): Promise<void>
       reject(err);
     }),
   );
+}
+
+/** Віддає файл зі сховища: зображення (крім SVG) і PDF — у браузері, решта — завантаженням. */
+export function sendStored(res: Response, f: { name: string; mime: string | null; storage_key: string }): void {
+  const inline = !!f.mime && f.mime !== 'image/svg+xml' && (f.mime.startsWith('image/') || f.mime === 'application/pdf');
+  res.set('Cache-Control', 'private, max-age=3600');
+  res.set('Content-Security-Policy', "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox");
+  res.attachment(f.name);
+  if (inline) res.set('Content-Disposition', res.get('Content-Disposition')!.replace(/^attachment/, 'inline'));
+  res.type(inline ? f.mime! : 'application/octet-stream');
+  res.sendFile(path.join(config.uploadDir, f.storage_key), (err) => {
+    if (err && !res.headersSent) res.status(404).json({ error: 'Файл відсутній у сховищі. Зверніться до адміністратора.' });
+  });
 }
 
 export const filesRouter = Router();
@@ -115,14 +128,6 @@ filesRouter.get('/files/:id', async (req, res) => {
   const f = r.rows[0];
   if (!f) throw notFound('Файл не знайдено.');
   if (f.category === 'spec' && !isOffice(u)) throw forbidden();
-  const inline = !!f.mime && f.mime !== 'image/svg+xml' && (f.mime.startsWith('image/') || f.mime === 'application/pdf');
-  res.set('Cache-Control', 'private, max-age=3600');
-  res.set('Content-Security-Policy', "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox");
-  res.attachment(f.name);
-  if (inline) res.set('Content-Disposition', res.get('Content-Disposition')!.replace(/^attachment/, 'inline'));
-  res.type(inline ? f.mime! : 'application/octet-stream');
-  res.sendFile(path.join(config.uploadDir, f.storage_key), (err) => {
-    if (err && !res.headersSent) res.status(404).json({ error: 'Файл відсутній у сховищі. Зверніться до адміністратора.' });
-  });
+  sendStored(res, f);
 });
 

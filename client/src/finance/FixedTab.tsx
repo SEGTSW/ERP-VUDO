@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { FIXED_PERIODS, lineLabel, money } from '@vudo/shared';
+import { FIXED_PERIODS, lineLabel, moneyKop as money } from '@vudo/shared';
 import { api, errorText } from '../api';
 import { ConfirmButton, Modal, WarnBox } from '../ui/common';
 import { useToast } from '../ui/toast';

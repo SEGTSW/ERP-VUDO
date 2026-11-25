@@ -1,6 +1,6 @@
 import { useDeferredValue, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { ACCOUNTS, ART_TYPES, PNL_LINES, fmtDate, isOwner, lineLabel, money, type Account } from '@vudo/shared';
+import { ACCOUNTS, ART_TYPES, PNL_LINES, fmtDate, isOwner, kop, lineLabel, moneyKop as money, type Account } from '@vudo/shared';
 import { api, errorText } from '../api';
 import { useMe } from '../session';
 import { useDrawer } from '../orders/hooks';
@@ -17,7 +17,7 @@ import { DebtsTab, DesignersTab, SalariesTab } from '../finance/MoneyTabs';
 type Tab = 'cash' | 'pnl' | 'debt' | 'des' | 'sal' | 'fixed' | 'loans' | 'bills' | 'registry' | 'arts';
 const MONTHS = ['Січень', 'Лютий', 'Березень', 'Квітень', 'Травень', 'Червень', 'Липень', 'Серпень', 'Вересень', 'Жовтень', 'Листопад', 'Грудень'];
 const monthName = (m: string) => `${MONTHS[Number(m.slice(5, 7)) - 1]} ${m.slice(0, 4)}`;
-const plain = (n: number) => money(n).replace(/\s?грн$/, '');
+const plain = kop;
 
 /** 10. Фінанси (власник — усі вкладки) / Оплати (менеджер — борги). */
 export function Finance() {

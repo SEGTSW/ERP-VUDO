@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { ACCOUNTS, money, type Account } from '@vudo/shared';
+import { ACCOUNTS, moneyKop as money, type Account } from '@vudo/shared';
 import { api, errorText } from '../api';
 import { Modal } from '../ui/common';
 import { useToast } from '../ui/toast';
@@ -30,7 +30,7 @@ export function ImportButton({ kind }: { kind: 'cash' | 'pnl' }) {
       const r = await api.upload<CashReport & { cells?: number; months?: string[] }>(kind === 'cash' ? '/finance/cash/import' : '/finance/pnl/import', form);
       for (const k of ['finance', 'log', 'order']) void qc.invalidateQueries({ queryKey: [k] });
       if (kind === 'cash') setReport(r);
-      else toast(`План імпортовано: ${r.cells} значень${r.months?.length ? ` (${r.months[0]} – ${r.months.at(-1)})` : ''}`);
+      else toast(`P&L імпортовано: ${r.cells} значень${r.months?.length ? ` (${r.months[0]} – ${r.months.at(-1)})` : ''}`);
     } catch (e) {
       toast(errorText(e), true);
     } finally {
@@ -42,7 +42,7 @@ export function ImportButton({ kind }: { kind: 'cash' | 'pnl' }) {
   return (
     <>
       <label className="btn" style={{ cursor: 'pointer' }} title="Файл Excel (.xlsx). З Numbers: Файл → Експортувати → Excel">
-        {busy ? 'Імпорт…' : kind === 'cash' ? 'Імпорт з Excel' : 'Імпорт плану з Excel'}
+        {busy ? 'Імпорт…' : kind === 'cash' ? 'Імпорт з Excel' : 'Імпорт P&L з Excel'}
         <input ref={input} type="file" accept=".xlsx" hidden disabled={busy} onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />
       </label>
       {report && (

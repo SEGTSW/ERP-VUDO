@@ -22,7 +22,7 @@ const monthsBack = (today: string, k: number) =>
 export async function opexInfo(db: Db, s: Settings): Promise<OpexInfo> {
   const today = kyivToday();
   const fixed = await db.query<{ amount: number; period: string }>('SELECT amount, period FROM fixed_costs WHERE active');
-  const fixedTotal = Math.round(fixed.rows.reduce((t, x) => t + perMonth(x.amount, x.period), 0));
+  const fixedTotal = Math.round(fixed.rows.reduce((t, x) => t + perMonth(x.amount, x.period), 0) * 100) / 100;
 
   // Дохід і постійні статті за 3 попередні повні місяці (з обліку, за рядками статейника)
   const m = [1, 2, 3].map((k) => monthsBack(today, k));
