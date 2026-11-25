@@ -355,7 +355,7 @@ export function SalariesTab() {
   const qs = new URLSearchParams(period.p);
   const q = useQuery({
     queryKey: ['finance', 'salaries', qs.toString()],
-    queryFn: () => api.get<{ rows: { id: number; name: string; roles: string[]; contracts: number; sales: number; pay: number | null }[]; pct: number | null; total: number }>(`/money/salaries?${qs}`),
+    queryFn: () => api.get<{ rows: { id: number; name: string; roles: string[]; seller: boolean; contracts: number; sales: number; pay: number | null }[]; pct: number | null; total: number }>(`/money/salaries?${qs}`),
   });
   const setPct = useMutation({
     mutationFn: (v: number | null) => api.patch('/settings', { mgrPct: v }),
@@ -395,9 +395,9 @@ export function SalariesTab() {
               <tr key={r.id} style={{ cursor: 'default' }}>
                 <td>{r.name}</td>
                 <td>{r.roles.join(', ')}</td>
-                <td className="r num">{r.contracts}</td>
-                <td className="r num">{money(r.sales)}</td>
-                <td className="r num">{d?.pct ? `${d.pct}%` : '—'}</td>
+                <td className="r num">{r.seller || r.contracts ? r.contracts : '—'}</td>
+                <td className="r num">{r.seller || r.contracts ? money(r.sales) : '—'}</td>
+                <td className="r num">{r.seller && d?.pct ? `${d.pct}%` : '—'}</td>
                 <td className="r num">{r.pay != null ? money(r.pay) : '—'}</td>
               </tr>
             ))}
@@ -411,7 +411,7 @@ export function SalariesTab() {
           <b>{money(d?.total ?? 0)}</b>
         </div>
       </div>
-      <div className="note">Продаж зараховується в місяць підписання договору, за ціною договору (без Відмов). Ставку задає лише власник.</div>
+      <div className="note">Продаж зараховується в місяць підписання договору, за ціною договору (без Відмов). Ставка % діє для менеджерів і власника; задає її лише власник.</div>
     </>
   );
 }

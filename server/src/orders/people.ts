@@ -1,4 +1,4 @@
-/** Перевірка людей, вибраних у замовленні: лише зі списку користувачів з потрібною роллю, активні (крім уже вибраних). */
+/** Перевірка людей, вибраних у замовленні: лише зі списку користувачів з потрібною роллю, активні; уже вибрані можна лишити, навіть якщо роль знято або доступ вимкнено. */
 import type { Role } from '@vudo/shared';
 import type { Db } from '../db.js';
 import { badRequest } from '../errors.js';
@@ -12,8 +12,9 @@ export async function checkPerson(
 ): Promise<string> {
   const r = await db.query<{ name: string; roles: Role[]; disabled: boolean }>('SELECT name, roles, disabled FROM users WHERE id = $1', [id]);
   const u = r.rows[0];
+  if (u && keep.includes(id)) return u.name;
   if (!u || !u.roles.some((x) => roles.includes(x))) throw badRequest(`${label}: виберіть зі списку працівників з роллю «${roles.join('» або «')}».`);
-  if (u.disabled && !keep.includes(id)) throw badRequest(`${label}: у користувача «${u.name}» вимкнено доступ.`);
+  if (u.disabled) throw badRequest(`${label}: у користувача «${u.name}» вимкнено доступ.`);
   return u.name;
 }
 

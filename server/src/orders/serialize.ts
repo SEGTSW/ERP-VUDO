@@ -3,7 +3,7 @@
  *  - офіс (менеджер, власник): усе, крім звітності; власник — ще маржа і чистий прибуток;
  *  - виконавці: жодних сум, цін, оплат; без файлів «Прорахунки / специфікації» та історії.
  */
-import { afterContract, isOwner, kyivToday, money, type Settings } from '@vudo/shared';
+import { afterContract, afterInstall, isOwner, kyivToday, money, type Settings } from '@vudo/shared';
 import type { Db } from '../db.js';
 import { visibleLogSql } from '../audit.js';
 import type { User } from '../users.js';
@@ -45,7 +45,7 @@ async function peopleNames(db: Db, ids: number[]): Promise<Map<number, string>> 
 /** «Що далі» для картки CRM (ТЗ розділ 7). */
 export function nextStep(o: OrderAgg, s: Settings, names: Map<number, string>, today = kyivToday()): { text: string; cls: '' | 'warn' | 'late' } {
   const { calc, late, items } = compute(o, s, today);
-  if (o.status === 'Змонтовано' && calc.debt > 0) return { text: `Отримати доплату ${money(calc.debt)}`, cls: 'warn' };
+  if (o.status !== 'Закрито' && o.status !== 'Рекламація' && afterInstall(o) && calc.debt > 0) return { text: `Отримати доплату ${money(calc.debt)}`, cls: 'warn' };
   if (afterContract(o.status) && o.status !== 'Закрито') {
     const sch = taskSchedule(o, today);
     const open = o.tasks
@@ -67,14 +67,14 @@ export function nextStep(o: OrderAgg, s: Settings, names: Map<number, string>, t
   const map: Record<string, string> = {
     'Звернення': 'Зробити прорахунок',
     'Прорахунок': noPrice ? 'Вказати ціни виробів' : 'Призначити замір',
-    'Замір': measured ? (noPrice ? 'Уточнити ціни виробів' : 'Надіслати пропозицію') : `Замір ${ddmm(o.measureDate)}${o.measurerId ? ` · ${names.get(o.measurerId) ?? ''}` : ''}`,
+    'Замір': measured ? 'Почати проєктування' : `Замір ${ddmm(o.measureDate)}${o.measurerId ? ` · ${names.get(o.measurerId) ?? ''}` : ''}`,
     'Очікує рішення клієнта': 'Зателефонувати клієнту',
-    'Проєктування': 'Погодити проєкт з клієнтом',
+    'Проєктування': noPrice ? 'Уточнити ціни виробів' : 'Надіслати пропозицію клієнту',
     'Проєкт погоджено': 'Підписати договір, отримати аванс',
-    'Договір / аванс отримано': 'Закупити матеріали',
-    'Готово до відвантаження': 'Призначити доставку й монтаж',
-    'Доставка / монтаж призначено': `Монтаж ${ddmm(o.installDate)}${installers ? ` · ${installers}` : ''}`,
-    'Змонтовано': 'Закрити замовлення',
+    'Договір / аванс отримано': 'Почати комплектування',
+    'Комплектування': 'Передати на збирання',
+    'Збирання': 'Призначити монтаж',
+    'Монтаж': afterInstall(o) ? 'Закрити замовлення' : `Монтаж ${ddmm(o.installDate)}${installers ? ` · ${installers}` : ''}`,
     'Закрито': 'Завершено',
     'Рекламація': 'Вирішити рекламацію',
   };

@@ -38,7 +38,7 @@ describe('ТЗ 15.1 — контрольні приклади', () => {
   });
 
   it('ціна 605 000, собівартість 319 000, дизайнеру 60 500, постійні 90 750 → прибуток 134 750 (22,3 %)', () => {
-    const r = netProfit({ price: 605000, cost: 319000, designer: 60500, opex: 90750, materialsFact: 0, collabFact: 0, status: 'У виробництві' });
+    const r = netProfit({ price: 605000, cost: 319000, designer: 60500, opex: 90750, materialsFact: 0, collabFact: 0, status: 'Збирання' });
     expect(r.profit).toBe(134750);
     expect(Math.round(r.pct * 10) / 10).toBe(22.3);
   });
@@ -94,9 +94,9 @@ describe('формули розділу 14', () => {
 
   it('чистий прибуток: факт матеріалів більший за план; у «Закрито» — лише факт', () => {
     const base = { price: 100000, cost: 50000, designer: 0, opex: 10000, materialsFact: 60000, collabFact: 0 };
-    expect(netProfit({ ...base, status: 'У виробництві' }).profit).toBe(30000);
+    expect(netProfit({ ...base, status: 'Збирання' }).profit).toBe(30000);
     expect(netProfit({ ...base, materialsFact: 40000, status: 'Закрито' }).profit).toBe(50000);
-    expect(netProfit({ ...base, materialsFact: 40000, status: 'У виробництві' }).profit).toBe(40000);
+    expect(netProfit({ ...base, materialsFact: 40000, status: 'Збирання' }).profit).toBe(40000);
   });
 
   it('прострочення = днів у статусі − норма', () => {
@@ -131,13 +131,14 @@ describe('формати і ролі', () => {
 });
 
 describe('порядок статусів (погоджено із замовником)', () => {
-  it('Звернення → Прорахунок → Замір → Очікування → Проєктування → Договір', () => {
-    expect(STATUSES.slice(0, 7)).toEqual([
-      'Звернення', 'Прорахунок', 'Замір', 'Очікує рішення клієнта', 'Проєктування', 'Проєкт погоджено', 'Договір / аванс отримано',
+  it('Звернення → Прорахунок → Замір → Проєктування → Очікування → Договір; виробництво', () => {
+    expect(STATUSES).toEqual([
+      'Звернення', 'Прорахунок', 'Замір', 'Проєктування', 'Очікує рішення клієнта', 'Проєкт погоджено',
+      'Договір / аванс отримано', 'Комплектування', 'Збирання', 'Монтаж', 'Закрито',
     ]);
     expect(nextStatuses('Звернення')).toEqual(['Прорахунок', 'Відмова']);
     expect(nextStatuses('Проєкт погоджено')).toEqual(['Договір / аванс отримано', 'Відмова']);
-    expect(nextStatuses('Договір / аванс отримано')).toEqual(['Закупівля матеріалів']);
+    expect(nextStatuses('Договір / аванс отримано')).toEqual(['Комплектування']);
   });
 
   it('до договору — продажі; договір фіксує «після договору»; етапи плану за статусами', () => {
@@ -146,13 +147,16 @@ describe('порядок статусів (погоджено із замовн�
     expect(afterContract('Проєкт погоджено')).toBe(false);
     expect(afterContract('Договір / аванс отримано')).toBe(true);
     expect(stagePassed('Замір', 'Замір')).toBe(false);
-    expect(stagePassed('Очікує рішення клієнта', 'Замір')).toBe(true);
+    expect(stagePassed('Проєктування', 'Замір')).toBe(true);
     expect(stagePassed('Очікує рішення клієнта', 'Прорахунок')).toBe(true);
     // групи і межі статусів
-    expect(statusGroup('Готово до відвантаження')).toBe('work');
-    expect(statusGroup('Доставка / монтаж призначено')).toBe('field');
-    expect(nextStatuses('Доставка / монтаж призначено')).not.toContain('Рекламація');
-    expect(nextStatuses('Змонтовано')).toContain('Рекламація');
+    expect(statusGroup('Збирання')).toBe('work');
+    expect(statusGroup('Монтаж')).toBe('field');
+    expect(nextStatuses('Збирання')).toEqual(['Монтаж']);
+    expect(nextStatuses('Монтаж')).toEqual(['Закрито', 'Рекламація']);
+    expect(nextStatuses('Рекламація')).toEqual(['Закрито']);
+    expect(stagePassed('Монтаж', 'Збірка')).toBe(true);
+    expect(stagePassed('Монтаж', 'Монтаж')).toBe(false);
     expect(stagePassed('Проєкт погоджено', 'Конструктив')).toBe(true);
     expect(stagePassed('Договір / аванс отримано', 'Збірка')).toBe(false);
   });

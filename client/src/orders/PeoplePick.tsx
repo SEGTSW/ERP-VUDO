@@ -2,10 +2,14 @@ import { useEffect, useRef } from 'react';
 import type { Role } from '@vudo/shared';
 import type { Person } from '../types';
 
-/** Активні люди з роллю + уже вибрані (навіть якщо вимкнені). Вільного тексту для людей немає. */
+/** Активні люди з роллю + уже вибрані (навіть якщо вимкнені або роль знято — щоб їх було видно і можна прибрати). Вільного тексту для людей немає. */
 export function peopleWith(people: Person[], roles: Role[], keep: (number | null | undefined)[] = []) {
-  return people.filter((u) => u.roles.some((r) => roles.includes(r)) && (!u.disabled || keep.includes(u.id)));
+  return people.filter((u) => keep.includes(u.id) || (u.roles.some((r) => roles.includes(r)) && !u.disabled));
 }
+
+/** Ім'я з позначкою, якщо вибрана людина вже не має потрібної ролі або доступ вимкнено. */
+const label = (u: Person, roles: Role[]) =>
+  !u.roles.some((r) => roles.includes(r)) ? `${u.name} (роль знято)` : u.disabled ? `${u.name} (вимкнено)` : u.name;
 
 export function PersonSelect({
   people,
@@ -28,7 +32,7 @@ export function PersonSelect({
       {empty != null && <option value="">{empty}</option>}
       {list.map((u) => (
         <option key={u.id} value={u.id}>
-          {u.name}
+          {label(u, roles)}
         </option>
       ))}
     </select>
@@ -60,7 +64,7 @@ export function MultiPick({ people, role, value, onChange }: { people: Person[];
                 checked={value.includes(u.id)}
                 onChange={(e) => onChange(e.target.checked ? [...value, u.id] : value.filter((x) => x !== u.id))}
               />{' '}
-              {u.name}
+              {label(u, [role])}
             </label>
           ))
         ) : (

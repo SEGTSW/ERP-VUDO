@@ -163,6 +163,13 @@ describe('оплати, борги, дизайнерам, нарахування
     r = (await a.get('/api/money/salaries')).body;
     expect(r.rows.find((x: { name: string }) => x.name === 'Ірина').pay).toBe(450);
     expect(r.total).toBe(450);
+    // усі активні працівники; без % — не продавцям; вимкнені не показуються
+    await makeUser('roman', ['Цех'], { name: 'Роман' });
+    await makeUser('old', ['Монтажник'], { name: 'Звільнений', disabled: true });
+    r = (await a.get('/api/money/salaries')).body;
+    expect(r.rows.find((x: { name: string }) => x.name === 'Роман')).toMatchObject({ roles: ['Цех'], seller: false, pay: null });
+    expect(r.rows.some((x: { name: string }) => x.name === 'Звільнений')).toBe(false);
+    expect(r.total).toBe(450);
   });
 });
 

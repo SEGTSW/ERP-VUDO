@@ -71,7 +71,7 @@ moneyRouter.get('/money/debts', requireOffice, async (req, res) => {
       price: c.price,
       paid: c.paid,
       debt: c.debt,
-      afterInstall: afterInstall(o.status),
+      afterInstall: afterInstall(o),
     }));
   res.json({
     rows,
@@ -163,14 +163,14 @@ moneyRouter.post('/money/designers/:id/payouts', requireOwner, async (req, res) 
   res.status(201).json({ ok: true });
 });
 
-/* ---------- 10.6 Нарахування менеджерам ---------- */
+/* ---------- 10.6 Нарахування ЗП: усі активні працівники; % від продажів — лише менеджерам і власнику ---------- */
 
 moneyRouter.get('/money/salaries', requireOwner, async (req, res) => {
   const q = period.parse(req.query);
   if (q.from && q.to && q.from > q.to) throw badRequest('Дата «від» пізніша за «до».');
   const s = await getSettings(pool);
   const people = await pool.query<{ id: number; name: string; roles: string[] }>(
-    `SELECT id, name, roles FROM users WHERE NOT disabled AND roles && ARRAY['Менеджер','Адмін'] ORDER BY name`,
+    `SELECT id, name, roles FROM users WHERE NOT disabled ORDER BY name`,
   );
   // Продаж — у місяць підписання договору, за ціною договору, без Відмов
   const r = await pool.query<{ managerId: number; n: number; sales: number }>(
@@ -184,7 +184,8 @@ moneyRouter.get('/money/salaries', requireOwner, async (req, res) => {
   const rows = people.rows.map((p) => {
     const x = r.rows.find((y) => y.managerId === p.id);
     const sales = x?.sales ?? 0;
-    return { id: p.id, name: p.name, roles: p.roles, contracts: x?.n ?? 0, sales, pay: pct != null && pct > 0 ? Math.round(sales * pct) / 100 : null };
+    const seller = p.roles.some((r) => r === 'Менеджер' || r === 'Адмін');
+    return { id: p.id, name: p.name, roles: p.roles, seller, contracts: x?.n ?? 0, sales, pay: seller && pct != null && pct > 0 ? Math.round(sales * pct) / 100 : null };
   });
   res.json({ rows, pct, total: rows.reduce((t, x) => t + (x.pay ?? 0), 0) });
 });

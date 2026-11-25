@@ -1,13 +1,14 @@
 /** 8. Планування: етапи активних замовлень з розрахованими датами, вікно етапу, «Мій день». Сум тут немає. */
 import { Router } from 'express';
 import { z } from 'zod';
-import { addDays, daysBetween, fmtDate, isOffice, kyivToday, type Role } from '@vudo/shared';
+import { addDays, daysBetween, fmtDate, isOffice, kyivToday, money, type Role } from '@vudo/shared';
 import { pool, tx } from '../db.js';
 import { badRequest, forbidden, notFound } from '../errors.js';
 import { me, requireOffice, requireSection } from '../auth/middleware.js';
 import { writeLog } from '../audit.js';
-import { fetchOrder, fetchOrders, taskSchedule, type OrderAgg, type TaskRow } from '../orders/repo.js';
+import { compute, fetchOrder, fetchOrders, taskSchedule, type OrderAgg, type TaskRow } from '../orders/repo.js';
 import { makePlan, stageTeam } from '../orders/plan.js';
+import { getSettings } from '../settings.js';
 import { checkPerson } from '../orders/people.js';
 
 export const planRouter = Router();
@@ -277,6 +278,10 @@ planRouter.post('/myday/done', async (req, res) => {
         }
         await c.query('UPDATE plan_tasks SET progress = 100, start_date = $2, days = $3 WHERE id = $1', [t.id, start, days]);
         await writeLog(c, { userId: u.id, orderId: o.id, folder: t.stage === 'Замір' ? 'zamir' : 'mont', text: `План · ${t.stage}: виконано 100%` });
+        if (t.stage === 'Монтаж') {
+          const { debt } = compute(o, await getSettings(c), today).calc;
+          if (debt > 0) await writeLog(c, { userId: u.id, orderId: o.id, folder: 'fin', finScope: 'pay', text: `Сповіщення менеджеру: змонтовано, борг ${money(debt)}` });
+        }
       }
     }
   });

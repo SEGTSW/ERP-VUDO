@@ -100,7 +100,7 @@ describe('дата заміру — факт від менеджера', () => {
     const d = addDays(today, 1);
     await m.post(`/api/orders/${o.id}/status`, { to: 'Прорахунок', mode: 'step' });
     await m.post(`/api/orders/${o.id}/status`, { to: 'Замір', mode: 'step', values: { address: 'Ірпінь', measureDate: d, measurerId: ids.taras } });
-    const r = await m.post(`/api/orders/${o.id}/status`, { to: 'Очікує рішення клієнта', mode: 'step' });
+    const r = await m.post(`/api/orders/${o.id}/status`, { to: 'Проєктування', mode: 'step' });
     expect(r.body.tasks.find((x: { stage: string }) => x.stage === 'Замір')).toMatchObject({ startDate: d, days: 1, progress: 100 });
     // зміна дати після виконання теж переносить етап
     const card = r.body;
@@ -144,7 +144,7 @@ describe('Мій день (8А.3)', () => {
     expect((await ol.post('/api/myday/done', { taskIds: v.taskIds })).status).toBe(200);
     day = (await ol.get(`/api/myday?date=${addDays(today, 3)}`)).body;
     expect(day.visits[0].done).toBe(true);
-    expect((await logTexts()).at(-1)).toBe('План · Монтаж: виконано 100%');
+    expect(await logTexts()).toContain('План · Монтаж: виконано 100%');
     // менеджер дивиться виїзди будь-якого працівника
     const mm = (await m.get(`/api/myday?user=${ids.oleh}&date=${addDays(today, 3)}`)).body;
     expect(mm.visits).toHaveLength(1);

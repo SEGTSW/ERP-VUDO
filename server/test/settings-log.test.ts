@@ -12,7 +12,7 @@ describe('налаштування (13)', () => {
     const s = await loginAs('admin');
     const res = await s.get('/api/settings');
     expect(res.body).toMatchObject({ avansPct: 30, markupPct: 50, designerPct: 10, opexPct: 15, opexMode: 'auto', mgrPct: null });
-    expect(res.body.norms['У виробництві']).toBe(14);
+    expect(res.body.norms['Збирання']).toBe(14);
   });
 
   it('менеджер не бачить і не змінює полів звітності', async () => {

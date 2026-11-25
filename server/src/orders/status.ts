@@ -99,7 +99,7 @@ export async function moveStatus(
     if (err) throw badRequest(err);
   } else {
     if (to === REFUSAL && !switchAllowed(from, to)) throw badRequest('Відмова можлива лише до договору. Після договору — «Рекламація» або архів.');
-    if (to === CLAIM && !switchAllowed(from, to)) throw badRequest('Рекламацію можна відкрити лише після монтажу.');
+    if (to === CLAIM && !switchAllowed(from, to)) throw badRequest('Рекламацію можна відкрити лише зі статусу «Монтаж» або «Закрито».');
     if (fi > 0 && ti > fi) {
       for (let k = fi + 1; k <= ti; k++) {
         const err = precheck(o, STATUSES[k - 1]!, s);
@@ -181,20 +181,6 @@ export async function moveStatus(
     await writeLog(c, { userId, orderId: o.id, folder: 'fin', finScope: 'pay', text: `Договір: ціна зафіксована ${money(calc.price)}` });
   }
 
-  // Записи-сповіщення менеджеру
-  if (to === 'Готово до відвантаження')
-    await writeLog(c, { userId, orderId: o.id, folder: 'mont', text: 'Сповіщення менеджеру: готово до відвантаження' });
-  if (to === 'Змонтовано') {
-    if (calc.debt > 0)
-      await writeLog(c, {
-        userId,
-        orderId: o.id,
-        folder: 'fin',
-        finScope: 'pay',
-        text: `Сповіщення менеджеру: змонтовано, борг ${money(calc.debt)}`,
-      });
-    else await writeLog(c, { userId, orderId: o.id, folder: 'mont', text: 'Сповіщення менеджеру: змонтовано' });
-  }
   return to;
 }
 

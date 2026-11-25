@@ -118,7 +118,7 @@ statsRouter.get('/stats', requireSection('stats'), async (req, res) => {
     reasons: [...reasons.entries()].sort((a, b) => b[1] - a[1]).map(([reason, n]) => ({ reason, n })),
     leadToContract: avgDays(won.map((o) => daysBetween(o.createdDate, o.contractDate!))),
     contractToInstall: avgDays(
-      all.filter((o) => inP(o.contractDate) && afterInstall(o.status) && (o.installDate || o.closedDate)).map((o) => daysBetween(o.contractDate!, (o.installDate ?? o.closedDate)!)),
+      all.filter((o) => inP(o.contractDate) && afterInstall(o) && (o.installDate || o.closedDate)).map((o) => daysBetween(o.contractDate!, (o.installDate ?? o.closedDate)!)),
     ),
   });
 });
