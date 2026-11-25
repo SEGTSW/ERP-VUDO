@@ -22,6 +22,17 @@ export const LINE_KIND: Record<PnlLine, 'in' | 'out' | 'mix' | 'none'> = {
   none: 'none',
 };
 
+/**
+ * «Майбутні витрати закриті» — ручне поле місяця (не рядок статейника): частина витрат на замовлення з обліку,
+ * якою закрито майбутні витрати. Факт «Витрат на замовлення» показується без неї; виручка не змінюється.
+ */
+export const FUTURE_CLOSED = 'futureClosed';
+export const FUTURE_CLOSED_LABEL = 'Майбутні витрати закриті';
+
+/** Факт витрат на замовлення без закритих майбутніх витрат (сума зі знаком). */
+export const orderCostShown = (fact: number | undefined, closed: number | undefined) =>
+  Math.round(((fact ?? 0) + (closed ?? 0)) * 100) / 100;
+
 /** Операційні рядки, що входять у «Результат операційної діяльності». */
 export const OPEX_LINES: PnlLine[] = ['admin', 'payroll', 'other', 'marketing', 'tax', 'logistics', 'collab', 'claim', 'credit', 'working'];
 export const INVEST_LINES: PnlLine[] = ['invPlus', 'invMinus', 'dividends', 'loan'];

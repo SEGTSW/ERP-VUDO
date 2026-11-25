@@ -40,7 +40,7 @@ if (values.pnl) {
   const p = parsePnlSheet(wb.worksheets[0]!);
   await tx(async (c) => {
     for (const x of p.cells) {
-      const amount = LINE_KIND[x.line] === 'mix' ? x.amount : Math.abs(x.amount);
+      const amount = x.line !== 'futureClosed' && LINE_KIND[x.line] === 'mix' ? x.amount : Math.abs(x.amount);
       await c.query(
         `INSERT INTO pnl_plan (month, line, amount, updated_by) VALUES ($1, $2, $3, $4)
          ON CONFLICT (month, line) DO UPDATE SET amount = EXCLUDED.amount, updated_at = now(), updated_by = EXCLUDED.updated_by`,

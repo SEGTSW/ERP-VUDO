@@ -1,6 +1,6 @@
 import { Fragment, useLayoutEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { INVEST_LINES, OPEX_LINES, lineLabel, planSigned, pnlDerived, type LineSums, type PnlLine } from '@vudo/shared';
+import { FUTURE_CLOSED, FUTURE_CLOSED_LABEL, INVEST_LINES, OPEX_LINES, lineLabel, orderCostShown, planSigned, pnlDerived, type LineSums, type PnlLine } from '@vudo/shared';
 import { api, errorText } from '../api';
 import { useToast } from '../ui/toast';
 import { ImportButton } from './ImportButton';
@@ -11,6 +11,7 @@ interface PnlData {
   fact: Record<string, Record<string, number>>;
   plan: Record<string, Record<string, number>>;
   future: Record<string, { paid: number; unpaid: number }>;
+  futureClosed: Record<string, number>;
   opening: number;
   years: number[];
   today: string;
@@ -76,6 +77,9 @@ export function PnlTab() {
   const tot = (get: (m: string) => number | null | undefined) => ms.reduce((s, m) => s + (get(m) ?? 0), 0);
   const cc = (m: string) => (m === cur ? 'cur' : '');
 
+  // Факт рядка на екрані: витрати на замовлення — без закритих майбутніх витрат
+  const shown = (k: PnlLine, m: string) => (k === 'orderCost' ? orderCostShown(F(m).orderCost, d.futureClosed[m]) : F(m)[k]);
+
   const base = (k: PnlLine) => (
     <Fragment key={k}>
       <tr className="pl">
@@ -92,11 +96,11 @@ export function PnlTab() {
       </tr>
       <tr className="fa">
         {ms.map((m) => (
-          <td key={m} className={`r num ${cc(m)} ${(F(m)[k] ?? 0) < 0 ? 'neg' : ''}`}>
-            {num(F(m)[k])}
+          <td key={m} className={`r num ${cc(m)} ${(shown(k, m) ?? 0) < 0 ? 'neg' : ''}`}>
+            {num(shown(k, m))}
           </td>
         ))}
-        <td className="r num">{num(tot((m) => F(m)[k]))}</td>
+        <td className="r num">{num(tot((m) => shown(k, m)))}</td>
       </tr>
     </Fragment>
   );
@@ -208,6 +212,18 @@ export function PnlTab() {
               <td className="r num">{num(tot((m) => F(m).income))}</td>
             </tr>
             {base('orderCost')}
+            <tr className="fa">
+              <th>
+                {FUTURE_CLOSED_LABEL}
+                <small>вписується вручну, без мінуса</small>
+              </th>
+              {ms.map((m) => (
+                <td key={m} className={cc(m)}>
+                  <PlanCell value={d.futureClosed[m]} label={`${FUTURE_CLOSED_LABEL} ${m}`} onCommit={(v) => (v != null && v < 0 ? toast('Вкажіть суму без мінуса.', true) : save.mutate({ month: m, line: FUTURE_CLOSED, amount: v }))} />
+                </td>
+              ))}
+              <td className="r num">{num(-tot((m) => d.futureClosed[m]))}</td>
+            </tr>
             {derived('Виручка', 'revenue')}
             {derived('Маржа', 'margin', true)}
             {OPEX_LINES.map(base)}
@@ -248,6 +264,7 @@ export function PnlTab() {
       <div className="note" style={{ marginTop: 12 }}>
         Виручка = дохід + витрати на замовлення (витрати від'ємні). Результат = виручка + адміністративні, ФОП, інші, маркетинг, податки, логістика,
         співпраці, рекламація, кредити, оборотні кошти. Операції з рядком «не в P&L» (обмін коштів, зведення) рахуються лише в грошовому потоці й залишку.
+        «Майбутні витрати закриті» — частина витрат на замовлення з обліку: факт витрат показується без неї, виручка рахується з обома.
         Майбутні витрати: «ще не закрито» — залишки з «Рахунків до оплати» (за місяцем строку; без строку — поточний місяць) і несплачені щомісячні /
         щотижневі постійні витрати; реєстр платежів сюди не додається.
         План можна імпортувати з Excel: перший стовпець — назва рядка, у заголовку — місяці (ММ.РРРР).

@@ -16,7 +16,7 @@ import { balances, cashRows, loadArticles, orderFacts } from '../finance/cash.js
 import { fetchOrder, ownerFigures, compute } from '../orders/repo.js';
 import { opexInfo } from '../finance/opex.js';
 import { importCash, loadWorkbook, parseCashSheet, parsePnlSheet } from '../finance/import.js';
-import { FIXED_PERIODS, LINE_KIND, perMonth, planSigned, type PnlLine } from '@vudo/shared';
+import { FIXED_PERIODS, FUTURE_CLOSED, FUTURE_CLOSED_LABEL, LINE_KIND, perMonth, planSigned, type PnlLine } from '@vudo/shared';
 
 export const financeRouter = Router();
 financeRouter.use('/finance', requireOwner);
@@ -378,7 +378,11 @@ financeRouter.get('/finance/pnl', async (req, res) => {
     [`${year}-%`],
   );
   const planBy: Record<string, Record<string, number>> = Object.fromEntries(months.map((m) => [m, {}]));
-  for (const p of plan.rows) planBy[p.month]![p.line] = p.amount;
+  const futureClosed: Record<string, number> = {};
+  for (const p of plan.rows) {
+    if (p.line === FUTURE_CLOSED) futureClosed[p.month] = p.amount;
+    else planBy[p.month]![p.line] = p.amount;
+  }
   const years = await pool.query<{ y: number }>(
     `SELECT DISTINCT y FROM (
        SELECT extract(year FROM date)::int AS y FROM cash_ops UNION SELECT extract(year FROM date)::int FROM payments
@@ -390,6 +394,7 @@ financeRouter.get('/finance/pnl', async (req, res) => {
     fact,
     plan: planBy,
     future,
+    futureClosed,
     opening: Math.round(before * 100) / 100,
     years: [...new Set([...years.rows.map((x) => x.y), Number(today.slice(0, 4))])].sort(),
     today,
@@ -400,10 +405,11 @@ financeRouter.put('/finance/pnl/plan', async (req, res) => {
   const b = z
     .object({
       month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
-      line: z.enum(PNL_LINES.map((l) => l[0]).filter((l) => l !== 'none') as [string, ...string[]]),
+      line: z.enum([FUTURE_CLOSED, ...PNL_LINES.map((l) => l[0] as string).filter((l) => l !== 'none')]),
       amount: z.number().min(-1_000_000_000).max(1_000_000_000).nullable(),
     })
     .parse(req.body);
+  if (b.line === FUTURE_CLOSED && b.amount != null && b.amount < 0) throw badRequest('Вкажіть суму без мінуса.');
   const u = me(req);
   await tx(async (c) => {
     const r = await c.query<{ amount: number }>('SELECT amount FROM pnl_plan WHERE month = $1 AND line = $2 FOR UPDATE', [b.month, b.line]);
@@ -418,7 +424,7 @@ financeRouter.put('/finance/pnl/plan', async (req, res) => {
       );
     }
     const v = (x: number | null) => (x == null ? '—' : money(x));
-    await writeLog(c, { userId: u.id, folder: 'fin', finScope: 'report', text: `P&L план ${b.month} · ${lineLabel(b.line)}: ${v(old)} → ${v(b.amount)}` });
+    await writeLog(c, { userId: u.id, folder: 'fin', finScope: 'report', text: `${b.line === FUTURE_CLOSED ? `P&L ${b.month} · ${FUTURE_CLOSED_LABEL}` : `P&L план ${b.month} · ${lineLabel(b.line)}`}: ${v(old)} → ${v(b.amount)}` });
   });
   res.json({ ok: true });
 });
@@ -602,7 +608,7 @@ financeRouter.post('/finance/pnl/import', async (req, res) => {
   }
   await tx(async (c) => {
     for (const x of parsed.cells) {
-      const k = LINE_KIND[x.line];
+      const k = x.line === FUTURE_CLOSED ? 'out' : LINE_KIND[x.line];
       // план витрат і доходів — без знака (знак визначає рядок), «Кредити» / «Позика» — зі знаком
       const amount = k === 'mix' ? x.amount : Math.abs(x.amount);
       await c.query(

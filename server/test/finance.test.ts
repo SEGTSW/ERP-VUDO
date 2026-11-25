@@ -282,6 +282,11 @@ describe('імпорт з Excel (10.1, 10.2)', () => {
     expect(r.body).toMatchObject({ months: ['2026-10', '2026-11'] });
     const p = (await a.get('/api/finance/pnl?year=2026')).body;
     expect(p.plan['2026-10']).toEqual({ income: 952000, orderCost: 680000, payroll: 175000, loan: 124587.7 });
+    expect(p.futureClosed).toEqual({ '2026-10': 321850 });
+    const put = (amount: number) => a.agent.put('/api/finance/pnl/plan').set('X-VUDO', '1').send({ month: '2026-11', line: 'futureClosed', amount });
+    expect((await put(-5)).status).toBe(400);
+    expect((await put(700)).status).toBe(200);
+    expect((await a.get('/api/finance/pnl?year=2026')).body.futureClosed).toEqual({ '2026-10': 321850, '2026-11': 700 });
     expect(p.plan['2026-11']).toEqual({ income: 1120000, orderCost: 800000, payroll: 175000 });
   });
 });

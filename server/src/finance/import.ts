@@ -10,7 +10,7 @@
  */
 import ExcelJS from 'exceljs';
 import type pg from 'pg';
-import { ART_TYPES, PNL_LINES, type Account, type PnlLine } from '@vudo/shared';
+import { ART_TYPES, FUTURE_CLOSED, FUTURE_CLOSED_LABEL, PNL_LINES, type Account, type PnlLine } from '@vudo/shared';
 
 type Cell = ExcelJS.CellValue;
 
@@ -172,8 +172,9 @@ export async function importCash(c: pg.PoolClient, rows: CashImportRow[], userId
 }
 
 /** Назва рядка у файлі → рядок P&L системи. */
-const LINE_BY_NAME: Record<string, PnlLine> = (() => {
-  const m: Record<string, PnlLine> = {};
+type PlanLine = PnlLine | typeof FUTURE_CLOSED;
+const LINE_BY_NAME: Record<string, PlanLine> = (() => {
+  const m: Record<string, PlanLine> = { [norm(FUTURE_CLOSED_LABEL)]: FUTURE_CLOSED };
   for (const [k, l] of PNL_LINES) m[norm(l)] = k;
   Object.assign(m, {
     [norm('Витрати')]: 'orderCost',
@@ -184,7 +185,7 @@ const LINE_BY_NAME: Record<string, PnlLine> = (() => {
   return m;
 })();
 
-export function parsePnlSheet(ws: ExcelJS.Worksheet): { cells: { month: string; line: PnlLine; amount: number }[]; months: string[] } {
+export function parsePnlSheet(ws: ExcelJS.Worksheet): { cells: { month: string; line: PlanLine; amount: number }[]; months: string[] } {
   // Рядок з місяцями — той, де найбільше клітинок виду ММ.РРРР / дата
   let best = { row: 0, months: new Map<number, string>() };
   ws.eachRow((row, i) => {
@@ -199,7 +200,7 @@ export function parsePnlSheet(ws: ExcelJS.Worksheet): { cells: { month: string; 
     if (months.size > best.months.size) best = { row: i, months };
   });
   if (best.months.size < 1) throw new Error('Не знайдено рядок з місяцями (ММ.РРРР).');
-  const cells: { month: string; line: PnlLine; amount: number }[] = [];
+  const cells: { month: string; line: PlanLine; amount: number }[] = [];
   ws.eachRow((row, i) => {
     if (i <= best.row) return;
     const name = str(plain(row.getCell(1).value));

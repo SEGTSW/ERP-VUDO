@@ -164,7 +164,9 @@ describe('порядок статусів (погоджено із замовн�
 
 describe('P&L — формули 18–19', () => {
   it('виручка, маржа, результат, операційна маржа', async () => {
-    const { pnlDerived, planSigned } = await import('./pnl.js');
+    const { orderCostShown, pnlDerived, planSigned } = await import('./pnl.js');
+    // Жовтень із файлу замовника: 621 283,98 = 299 433,49 (факт) + 321 850,49 (майбутні закриті)
+    expect(orderCostShown(-621283.98, 321850.49)).toBe(-299433.49);
     const d = pnlDerived({ income: 621284, orderCost: -321850, admin: -40413, payroll: -90386, marketing: -10000, credit: 5000 });
     expect(d.revenue).toBe(299434);
     expect(Math.round(d.margin! * 10) / 10).toBe(48.2);

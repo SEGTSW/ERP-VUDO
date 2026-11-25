@@ -12,7 +12,7 @@ import { HttpError, badRequest, forbidden } from '../errors.js';
 import { me } from '../auth/middleware.js';
 import { writeLog } from '../audit.js';
 import { pool } from '../db.js';
-import { ACCOUNTS } from '@vudo/shared';
+import { ACCOUNTS, FUTURE_CLOSED_LABEL, orderCostShown } from '@vudo/shared';
 import type { User } from '../users.js';
 
 type Kind = 'text' | 'money' | 'date' | 'int' | 'num' | 'pct';
@@ -288,7 +288,7 @@ async function financeSheets(req: Request, u: User): Promise<Sheet[]> {
 
   const cash = await internal<{ rows: Row[] }>(req, '/finance/cash?month=');
   const year = Number(kyivToday().slice(0, 4));
-  const pnl = await internal<{ months: string[]; fact: Record<string, Row>; plan: Record<string, Row>; future: Record<string, { paid: number; unpaid: number }> }>(req, `/finance/pnl?year=${year}`);
+  const pnl = await internal<{ months: string[]; fact: Record<string, Row>; plan: Record<string, Row>; future: Record<string, { paid: number; unpaid: number }>; futureClosed: Record<string, number> }>(req, `/finance/pnl?year=${year}`);
   const des = await internal<{ rows: Row[] }>(req, '/money/designers');
   const fixed = await internal<{ rows: Row[] }>(req, '/finance/fixed');
   const arts = await internal<Row[]>(req, '/finance/articles');
@@ -318,7 +318,8 @@ async function financeSheets(req: Request, u: User): Promise<Sheet[]> {
       rows: [
         ...lines.flatMap((l) => [
           { line: l === 'income' ? 'Плановий дохід' : lineLabel(l), kind: 'план', ...Object.fromEntries(pnl.months.map((m) => [m, pnl.plan[m]?.[l]])) },
-          { line: lineLabel(l), kind: 'факт', ...Object.fromEntries(pnl.months.map((m) => [m, pnl.fact[m]?.[l]])) },
+          { line: lineLabel(l), kind: 'факт', ...Object.fromEntries(pnl.months.map((m) => [m, l === 'orderCost' ? orderCostShown(pnl.fact[m]?.[l] as number | undefined, pnl.futureClosed[m]) : pnl.fact[m]?.[l]])) },
+          ...(l === 'orderCost' ? [{ line: FUTURE_CLOSED_LABEL, kind: 'факт', ...Object.fromEntries(pnl.months.map((m) => [m, pnl.futureClosed[m] ? -pnl.futureClosed[m]! : null])) }] : []),
         ]),
         { line: 'Майбутні витрати', kind: 'усього за місяць', ...Object.fromEntries(pnl.months.map((m) => [m, pnl.future[m]!.paid + pnl.future[m]!.unpaid])) },
         { line: 'Майбутні витрати', kind: 'сплачено', ...Object.fromEntries(pnl.months.map((m) => [m, pnl.future[m]!.paid])) },
