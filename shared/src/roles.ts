@@ -61,7 +61,7 @@ export function navFor(u: RoleHolder): NavItem[] {
       { key: 'stock', label: 'Склад залишків' },
       { key: 'myday', label: 'Виїзди' },
       { key: 'clients', label: 'Клієнти' },
-      { key: 'finance', label: isOwner(u) ? 'Фінанси' : 'Оплати' },
+      { key: 'finance', label: isOwner(u) ? 'Фінанси' : 'Борги' },
       { key: 'stats', label: 'Аналітика' },
       { key: 'time', label: 'Табель' },
       { key: 'kb', label: 'База знань' },

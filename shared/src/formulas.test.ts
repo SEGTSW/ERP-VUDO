@@ -120,7 +120,7 @@ describe('формати і ролі', () => {
   });
 
   it('меню і стартовий розділ за ролями', () => {
-    expect(navFor({ roles: ['Менеджер'] }).find((n) => n.key === 'finance')?.label).toBe('Оплати');
+    expect(navFor({ roles: ['Менеджер'] }).find((n) => n.key === 'finance')?.label).toBe('Борги');
     expect(navFor({ roles: ['Адмін'] }).find((n) => n.key === 'finance')?.label).toBe('Фінанси');
     expect(navFor({ roles: ['Замірник', 'Монтажник'] }).map((n) => n.key)).toEqual(['myday', 'orders', 'plan', 'kb', 'notes']);
     expect(navFor({ roles: ['Цех'] }).map((n) => n.key)).toEqual(['orders', 'stock', 'plan', 'kb', 'notes']);
@@ -132,8 +132,8 @@ describe('формати і ролі', () => {
 
 describe('порядок статусів (погоджено із замовником)', () => {
   it('Звернення → Прорахунок → Замір → Очікування → Проєктування → Договір', () => {
-    expect(STATUSES.slice(0, 8)).toEqual([
-      'Звернення', 'Прорахунок', 'Замір призначено', 'Замір виконано', 'Очікує рішення клієнта', 'Проєктування', 'Проєкт погоджено', 'Договір / аванс отримано',
+    expect(STATUSES.slice(0, 7)).toEqual([
+      'Звернення', 'Прорахунок', 'Замір', 'Очікує рішення клієнта', 'Проєктування', 'Проєкт погоджено', 'Договір / аванс отримано',
     ]);
     expect(nextStatuses('Звернення')).toEqual(['Прорахунок', 'Відмова']);
     expect(nextStatuses('Проєкт погоджено')).toEqual(['Договір / аванс отримано', 'Відмова']);
@@ -145,8 +145,14 @@ describe('порядок статусів (погоджено із замовн�
     expect(statusGroup('Договір / аванс отримано')).toBe('work');
     expect(afterContract('Проєкт погоджено')).toBe(false);
     expect(afterContract('Договір / аванс отримано')).toBe(true);
-    expect(stagePassed('Замір виконано', 'Замір')).toBe(true);
-    expect(stagePassed('Замір виконано', 'Прорахунок')).toBe(false);
+    expect(stagePassed('Замір', 'Замір')).toBe(false);
+    expect(stagePassed('Очікує рішення клієнта', 'Замір')).toBe(true);
+    expect(stagePassed('Очікує рішення клієнта', 'Прорахунок')).toBe(true);
+    // групи і межі статусів
+    expect(statusGroup('Готово до відвантаження')).toBe('work');
+    expect(statusGroup('Доставка / монтаж призначено')).toBe('field');
+    expect(nextStatuses('Доставка / монтаж призначено')).not.toContain('Рекламація');
+    expect(nextStatuses('Змонтовано')).toContain('Рекламація');
     expect(stagePassed('Проєкт погоджено', 'Конструктив')).toBe(true);
     expect(stagePassed('Договір / аванс отримано', 'Збірка')).toBe(false);
   });

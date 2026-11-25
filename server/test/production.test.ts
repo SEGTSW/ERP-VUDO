@@ -95,12 +95,12 @@ describe('дата заміру — факт від менеджера', () => {
     expect(c2.body.tasks.find((x: { stage: string }) => x.stage === 'Замір')).toMatchObject({ startDate: addDays(d, 1), days: 1 });
   });
 
-  it('«Замір виконано» раніше за дату заміру — етап лишається на даті заміру', async () => {
+  it('вихід зі статусу «Замір» раніше за дату заміру — етап лишається на даті заміру', async () => {
     const { o, m, ids } = await setup();
     const d = addDays(today, 1);
     await m.post(`/api/orders/${o.id}/status`, { to: 'Прорахунок', mode: 'step' });
-    await m.post(`/api/orders/${o.id}/status`, { to: 'Замір призначено', mode: 'step', values: { address: 'Ірпінь', measureDate: d, measurerId: ids.taras } });
-    const r = await m.post(`/api/orders/${o.id}/status`, { to: 'Замір виконано', mode: 'step' });
+    await m.post(`/api/orders/${o.id}/status`, { to: 'Замір', mode: 'step', values: { address: 'Ірпінь', measureDate: d, measurerId: ids.taras } });
+    const r = await m.post(`/api/orders/${o.id}/status`, { to: 'Очікує рішення клієнта', mode: 'step' });
     expect(r.body.tasks.find((x: { stage: string }) => x.stage === 'Замір')).toMatchObject({ startDate: d, days: 1, progress: 100 });
     // зміна дати після виконання теж переносить етап
     const card = r.body;
@@ -112,11 +112,11 @@ describe('дата заміру — факт від менеджера', () => {
     expect(c2.tasks.find((x: { stage: string }) => x.stage === 'Замір')).toMatchObject({ startDate: addDays(today, 3), progress: 100 });
   });
 
-  it('дата з вікна «Замір призначено» теж ставить етап', async () => {
+  it('дата з вікна «Замір» теж ставить етап', async () => {
     const { o, m, ids } = await setup();
     const d = addDays(today, 1);
     await m.post(`/api/orders/${o.id}/status`, { to: 'Прорахунок', mode: 'step' });
-    const r = await m.post(`/api/orders/${o.id}/status`, { to: 'Замір призначено', mode: 'step', values: { address: 'Ірпінь', measureDate: d, measurerId: ids.taras } });
+    const r = await m.post(`/api/orders/${o.id}/status`, { to: 'Замір', mode: 'step', values: { address: 'Ірпінь', measureDate: d, measurerId: ids.taras } });
     expect(r.body.tasks.find((x: { stage: string }) => x.stage === 'Замір')).toMatchObject({ startDate: d, days: 1 });
   });
 });

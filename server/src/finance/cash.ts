@@ -2,7 +2,7 @@
  * Облік руху коштів (ТЗ 10.1): ручні операції + автоматичні рядки з оплат клієнтів
  * (і з виплат дизайнерам — з наступною частиною). Рядок P&L кожної операції — зі статейника.
  */
-import { lineFor, type ArticleRule, type PnlLine } from '@vudo/shared';
+import { ACCOUNTS, METHOD_ACCOUNT, lineFor, type Account, type ArticleRule, type PnlLine } from '@vudo/shared';
 import type { Db } from '../db.js';
 
 export interface Article extends ArticleRule {
@@ -30,13 +30,17 @@ export interface CashRow {
   orderId: number | null;
   counterparty: string;
   note: string;
-  account: 'Карта' | 'Готівка';
+  account: Account;
   sum: number;
   line: PnlLine;
   derived: null | 'оплата' | 'дизайнер';
   updatedAt: string | null;
   updatedByName: string | null;
 }
+
+/** SQL: спосіб оплати → каса. */
+const accountSql = (col: string) =>
+  `CASE ${col} ${Object.entries(METHOD_ACCOUNT).map(([m, a]) => `WHEN '${m}' THEN '${a}'`).join(' ')} END`;
 
 /** Усі рядки обліку (новіші вгорі). where — умова на дату для обох джерел (alias x.date). */
 export async function cashRows(db: Db, opts: { orderId?: number; from?: string; to?: string } = {}): Promise<CashRow[]> {
@@ -52,7 +56,7 @@ export async function cashRows(db: Db, opts: { orderId?: number; from?: string; 
               CASE WHEN p.type = 'повернення' THEN 'Витрата' ELSE 'Дохід' END, 'Замовлення',
               '№' || o.num || ' · ' || cl.name, o.id, 'Замовник',
               p.type || CASE WHEN coalesce(p.comment, '') <> '' THEN ' · ' || p.comment ELSE '' END,
-              CASE WHEN p.method = 'готівка' THEN 'Готівка' ELSE 'Карта' END,
+              ${accountSql('p.method')},
               CASE WHEN p.type = 'повернення' THEN -p.sum ELSE p.sum END,
               'оплата', NULL, NULL, p.id
          FROM payments p JOIN orders o ON o.id = p.order_id JOIN clients cl ON cl.id = o.client_id
@@ -60,7 +64,7 @@ export async function cashRows(db: Db, opts: { orderId?: number; from?: string; 
        SELECT 'd' || d.id, NULL, d.date, 'Витрата', 'Співпраці', 'Виплата', NULL,
               dc.name || CASE WHEN coalesce(dc.company, '') <> '' THEN ' · ' || dc.company ELSE '' END,
               'бонус дизайнеру' || CASE WHEN coalesce(d.comment, '') <> '' THEN ' · ' || d.comment ELSE '' END,
-              CASE WHEN d.method = 'готівка' THEN 'Готівка' ELSE 'Карта' END, -d.sum, 'дизайнер', NULL, NULL, d.id
+              ${accountSql('d.method')}, -d.sum, 'дизайнер', NULL, NULL, d.id
          FROM designer_payouts d JOIN clients dc ON dc.id = d.designer_id
      ) x
      WHERE ($1::bigint IS NULL OR x."orderId" = $1) AND ($2::date IS NULL OR x.date >= $2) AND ($3::date IS NULL OR x.date <= $3)
@@ -70,21 +74,20 @@ export async function cashRows(db: Db, opts: { orderId?: number; from?: string; 
   return r.rows.map((x) => ({ ...x, line: lineFor(arts, x.type, x.cat, x.obj) }));
 }
 
-/** Залишки за весь час: карта (картка + рахунок), готівка, разом. */
+/** Залишки за весь час: по кожній касі й разом. */
 export async function balances(db: Db) {
   const r = await db.query<{ account: string; s: number }>(
     `SELECT account, sum(s)::numeric AS s FROM (
        SELECT account, sum AS s FROM cash_ops
        UNION ALL
-       SELECT CASE WHEN method = 'готівка' THEN 'Готівка' ELSE 'Карта' END,
+       SELECT ${accountSql('method')},
               CASE WHEN type = 'повернення' THEN -sum ELSE sum END FROM payments
        UNION ALL
-       SELECT CASE WHEN method = 'готівка' THEN 'Готівка' ELSE 'Карта' END, -sum FROM designer_payouts
+       SELECT ${accountSql('method')}, -sum FROM designer_payouts
      ) x GROUP BY account`,
   );
-  const card = r.rows.find((x) => x.account === 'Карта')?.s ?? 0;
-  const cash = r.rows.find((x) => x.account === 'Готівка')?.s ?? 0;
-  return { card, cash, total: Math.round((card + cash) * 100) / 100 };
+  const by = Object.fromEntries(ACCOUNTS.map((a) => [a, r.rows.find((x) => x.account === a)?.s ?? 0])) as Record<Account, number>;
+  return { by, total: Math.round(ACCOUNTS.reduce((t, a) => t + by[a], 0) * 100) / 100 };
 }
 
 /**

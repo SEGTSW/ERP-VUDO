@@ -12,6 +12,7 @@ import { HttpError, badRequest, forbidden } from '../errors.js';
 import { me } from '../auth/middleware.js';
 import { writeLog } from '../audit.js';
 import { pool } from '../db.js';
+import { ACCOUNTS } from '@vudo/shared';
 import type { User } from '../users.js';
 
 type Kind = 'text' | 'money' | 'date' | 'int' | 'num' | 'pct';
@@ -287,11 +288,11 @@ async function financeSheets(req: Request, u: User): Promise<Sheet[]> {
 
   const cash = await internal<{ rows: Row[] }>(req, '/finance/cash?month=');
   const year = Number(kyivToday().slice(0, 4));
-  const pnl = await internal<{ months: string[]; fact: Record<string, Row>; plan: Record<string, Row> }>(req, `/finance/pnl?year=${year}`);
+  const pnl = await internal<{ months: string[]; fact: Record<string, Row>; plan: Record<string, Row>; future: Record<string, { paid: number; unpaid: number }> }>(req, `/finance/pnl?year=${year}`);
   const des = await internal<{ rows: Row[] }>(req, '/money/designers');
   const fixed = await internal<{ rows: Row[] }>(req, '/finance/fixed');
   const arts = await internal<Row[]>(req, '/finance/articles');
-  const lines = ['income', 'orderCost', 'admin', 'payroll', 'other', 'marketing', 'tax', 'logistics', 'collab', 'credit', 'working', 'invPlus', 'invMinus', 'dividends', 'loan'];
+  const lines = ['income', 'orderCost', 'admin', 'payroll', 'other', 'marketing', 'tax', 'logistics', 'collab', 'claim', 'credit', 'working', 'invPlus', 'invMinus', 'dividends', 'loan'];
   return [
     {
       name: 'Облік',
@@ -303,23 +304,26 @@ async function financeSheets(req: Request, u: User): Promise<Sheet[]> {
         { h: 'Контрагент', k: 'counterparty' },
         { h: 'Примітка', k: 'note' },
         { h: 'Рядок P&L', k: 'lineName' },
-        { h: 'Карта, грн', k: 'card', t: 'money' },
-        { h: 'Готівка, грн', k: 'cash', t: 'money' },
+        ...ACCOUNTS.map((a) => ({ h: `${a}, грн`, k: a, t: 'money' as Kind })),
       ],
       rows: cash.rows.map((r) => ({
         ...r,
         lineName: lineLabel(String(r.line)),
-        card: r.account === 'Карта' ? r.sum : null,
-        cash: r.account === 'Готівка' ? r.sum : null,
+        [String(r.account)]: r.sum,
       })),
     },
     {
       name: 'P&L',
       cols: [{ h: 'Рядок', k: 'line' }, { h: 'План / факт', k: 'kind' }, ...pnl.months.map((m) => ({ h: m, k: m, t: 'money' as Kind }))],
-      rows: lines.flatMap((l) => [
-        { line: lineLabel(l), kind: 'план', ...Object.fromEntries(pnl.months.map((m) => [m, pnl.plan[m]?.[l]])) },
-        { line: lineLabel(l), kind: 'факт', ...Object.fromEntries(pnl.months.map((m) => [m, pnl.fact[m]?.[l]])) },
-      ]),
+      rows: [
+        ...lines.flatMap((l) => [
+          { line: l === 'income' ? 'Плановий дохід' : lineLabel(l), kind: 'план', ...Object.fromEntries(pnl.months.map((m) => [m, pnl.plan[m]?.[l]])) },
+          { line: lineLabel(l), kind: 'факт', ...Object.fromEntries(pnl.months.map((m) => [m, pnl.fact[m]?.[l]])) },
+        ]),
+        { line: 'Майбутні витрати', kind: 'усього за місяць', ...Object.fromEntries(pnl.months.map((m) => [m, pnl.future[m]!.paid + pnl.future[m]!.unpaid])) },
+        { line: 'Майбутні витрати', kind: 'сплачено', ...Object.fromEntries(pnl.months.map((m) => [m, pnl.future[m]!.paid])) },
+        { line: 'Майбутні витрати', kind: 'ще не закрито', ...Object.fromEntries(pnl.months.map((m) => [m, pnl.future[m]!.unpaid])) },
+      ],
     },
     paySheet,
     debtSheet,
@@ -363,6 +367,37 @@ async function financeSheets(req: Request, u: User): Promise<Sheet[]> {
         { h: 'Операцій', k: 'ops', t: 'int' },
       ],
       rows: arts.map((a) => ({ ...a, lineName: lineLabel(String(a.line)), orderText: a.toOrder ? 'так' : '' })),
+    },
+  ];
+}
+
+/** Реєстр платежів для бухгалтера (без скасованих; сплачені — лише з all=1). */
+async function registrySheets(req: Request): Promise<Sheet[]> {
+  const r = await internal<{ rows: Row[] }>(req, '/finance/payables?kind=registry');
+  return [
+    {
+      name: 'Реєстр платежів',
+      cols: [
+        { h: '№ платежу', k: 'no', t: 'int' },
+        { h: 'Дата оплати', k: 'paidDate', t: 'date' },
+        { h: 'Оплатити до', k: 'dueDate', t: 'date' },
+        { h: 'Контрагент', k: 'counterparty' },
+        { h: 'ЄДРПОУ / РНОКПП', k: 'taxId' },
+        { h: 'IBAN', k: 'iban' },
+        { h: 'За що', k: 'purpose' },
+        { h: '№ рахунку', k: 'invoice' },
+        { h: 'Дата рахунку', k: 'invoiceDate', t: 'date' },
+        { h: 'Сума, грн', k: 'amount', t: 'money' },
+        { h: 'ПДВ', k: 'vat', t: 'money' },
+        { h: 'Пріоритет', k: 'priority' },
+        { h: 'Залишок до сплати, грн', k: 'left', t: 'money' },
+        { h: 'Призначення платежу', k: 'purposeText' },
+        { h: 'Статус', k: 'status' },
+        { h: 'Примітка', k: 'note' },
+      ],
+      rows: r.rows
+        .filter((p) => !p.cancelled && (req.query.all === '1' || Number(p.left) > 0))
+        .map((p) => ({ ...p, paidDate: (p.payments as Row[]).at(-1)?.date })),
     },
   ];
 }
@@ -537,6 +572,7 @@ const SECTIONS: Record<string, { file: string; build: (req: Request, u: User) =>
   clients: { file: 'Клієнти', build: (r) => clientsSheets(r, 'clients') },
   designers: { file: 'Дизайнери', build: (r) => clientsSheets(r, 'designers') },
   finance: { file: 'Фінанси', build: financeSheets },
+  registry: { file: 'Реєстр_платежів', build: registrySheets },
   plan: { file: 'Планування', build: planSheets },
   myday: { file: 'Виїзди', build: mydaySheets },
   stock: { file: 'Склад', build: stockSheets },

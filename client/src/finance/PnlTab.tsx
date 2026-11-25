@@ -10,6 +10,7 @@ interface PnlData {
   months: string[];
   fact: Record<string, Record<string, number>>;
   plan: Record<string, Record<string, number>>;
+  future: Record<string, { paid: number; unpaid: number }>;
   opening: number;
   years: number[];
   today: string;
@@ -138,6 +139,20 @@ export function PnlTab() {
       <td colSpan={13} style={{ background: 'var(--bg)' }} />
     </tr>
   );
+  const futureRow = (label: string, hint: string, get: (m: string) => number, warn = false) => (
+    <tr className="fa">
+      <th>
+        {label}
+        <small>{hint}</small>
+      </th>
+      {ms.map((m) => (
+        <td key={m} className={`r num ${cc(m)} ${warn && get(m) > 0 ? 'neg' : ''}`}>
+          {num(get(m))}
+        </td>
+      ))}
+      <td className="r num">{num(tot(get))}</td>
+    </tr>
+  );
   let bal = d.opening;
   const balance = ms.map((m) => (bal += F(m).net ?? 0));
 
@@ -170,13 +185,38 @@ export function PnlTab() {
           </thead>
           <tbody>
             {sec('Операційна діяльність')}
-            {base('income')}
+            <tr className="pl">
+              <th>
+                Плановий дохід<small>вписується вручну</small>
+              </th>
+              {ms.map((m) => (
+                <td key={m} className={cc(m)}>
+                  <PlanCell value={d.plan[m]?.income} label={`Плановий дохід ${m}`} onCommit={(v) => save.mutate({ month: m, line: 'income', amount: v })} />
+                </td>
+              ))}
+              <td className="r num">{num(tot((m) => planS(m).income))}</td>
+            </tr>
+            <tr className="fa">
+              <th>
+                Дохід<small>факт</small>
+              </th>
+              {ms.map((m) => (
+                <td key={m} className={`r num ${cc(m)} ${(F(m).income ?? 0) < 0 ? 'neg' : ''}`}>
+                  {num(F(m).income)}
+                </td>
+              ))}
+              <td className="r num">{num(tot((m) => F(m).income))}</td>
+            </tr>
             {base('orderCost')}
             {derived('Виручка', 'revenue')}
             {derived('Маржа', 'margin', true)}
             {OPEX_LINES.map(base)}
             {derived('Результат операційної діяльності', 'result')}
             {derived('Операційна маржа', 'opMargin', true)}
+            {sec('Майбутні витрати')}
+            {futureRow('Витрати за місяць, усього', 'сплачені + ще не закриті', (m) => d.future[m]!.paid + d.future[m]!.unpaid)}
+            {futureRow('З них сплачено', 'з обліку', (m) => d.future[m]!.paid)}
+            {futureRow('З них ще не закрито', 'рахунки до оплати + постійні витрати', (m) => d.future[m]!.unpaid, true)}
             {sec('Інвестиційна діяльність')}
             {INVEST_LINES.map(base)}
             {sec('Рух грошей')}
@@ -193,7 +233,7 @@ export function PnlTab() {
             </tr>
             <tr className="fa calc">
               <th>
-                Залишок на кінець місяця<small>факт, рахунок + готівка</small>
+                Залишок на кінець місяця<small>факт, усі каси</small>
               </th>
               {ms.map((m, i) => (
                 <td key={m} className={`r num ${cc(m)} ${balance[i]! < 0 ? 'neg' : ''}`}>
@@ -207,7 +247,9 @@ export function PnlTab() {
       </div>
       <div className="note" style={{ marginTop: 12 }}>
         Виручка = дохід + витрати на замовлення (витрати від'ємні). Результат = виручка + адміністративні, ФОП, інші, маркетинг, податки, логістика,
-        співпраці, кредити, оборотні кошти. Операції з рядком «не в P&L» (обмін коштів, зведення) рахуються лише в грошовому потоці й залишку.
+        співпраці, рекламація, кредити, оборотні кошти. Операції з рядком «не в P&L» (обмін коштів, зведення) рахуються лише в грошовому потоці й залишку.
+        Майбутні витрати: «ще не закрито» — залишки з «Рахунків до оплати» (за місяцем строку; без строку — поточний місяць) і несплачені щомісячні /
+        щотижневі постійні витрати; реєстр платежів сюди не додається.
         План можна імпортувати з Excel: перший стовпець — назва рядка, у заголовку — місяці (ММ.РРРР).
       </div>
     </>

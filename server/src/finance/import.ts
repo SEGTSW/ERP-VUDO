@@ -1,16 +1,16 @@
 /**
  * Імпорт наявного обліку і плану P&L з Excel (ТЗ 10.1, 10.2).
  *
- * Облік: колонки Дата | Стаття | Підстаття | Обєкт | Контрагент | Примітка | USD | UAH | UAH(готівка).
+ * Облік: колонки Дата | Стаття | Підстаття | Обєкт | Контрагент | Примітка | USD | UAH | UAH(готівка) | ТОВ ВУДО | ФОП.
  *  - рядки без дати беруть дату попереднього; дата текстом («Старт 15.07.2026») — розпізнається;
- *  - сума UAH → каса «Карта», UAH(готівка) → «Готівка» (обидві в рядку — дві операції);
+ *  - сума UAH → каса «Карта», UAH(готівка) → «Готівка», ТОВ → «ТОВ», ФОП → «ФОП» (кілька в рядку — кілька операцій);
  *  - повторний імпорт не дублює записів (ключ: дата + примітка + сума + каса; однакові операції
  *    в самому файлі — справжні, тому додається лише різниця між кількістю у файлі і в базі).
  * План P&L: перший стовпець — назва рядка P&L, у заголовку — місяці (ММ.РРРР або дата).
  */
 import ExcelJS from 'exceljs';
 import type pg from 'pg';
-import { ART_TYPES, PNL_LINES, type PnlLine } from '@vudo/shared';
+import { ART_TYPES, PNL_LINES, type Account, type PnlLine } from '@vudo/shared';
 
 type Cell = ExcelJS.CellValue;
 
@@ -59,8 +59,7 @@ export interface ImportReport {
   duplicates: number;
   skipped: { row: number; reason: string }[];
   articlesAdded: number;
-  card: number;
-  cash: number;
+  byAccount: Record<Account, number>;
 }
 
 interface CashImportRow {
@@ -70,7 +69,7 @@ interface CashImportRow {
   obj: string;
   counterparty: string;
   note: string;
-  account: 'Карта' | 'Готівка';
+  account: Account;
   sum: number;
 }
 
@@ -93,6 +92,8 @@ export function parseCashSheet(ws: ExcelJS.Worksheet): { rows: CashImportRow[]; 
         else if (v === 'usd') col.usd = k;
         else if (v === 'uah') col.uah = k;
         else if (v === 'uah(готівка)' || v === 'uahготівка') col.cash = k;
+        else if (v.startsWith('тов')) col.tov = k;
+        else if (v.startsWith('фоп')) col.fop = k;
       });
     }
   });
@@ -109,9 +110,11 @@ export function parseCashSheet(ws: ExcelJS.Worksheet): { rows: CashImportRow[]; 
     const usd = num(g(col.usd));
     const uah = num(g(col.uah));
     const cash = num(g(col.cash));
+    const tov = num(g(col.tov));
+    const fop = num(g(col.fop));
     const d = parseDate(g(col.date)) ?? prevDate;
     if (parseDate(g(col.date))) prevDate = parseDate(g(col.date));
-    if (!type && !uah && !cash && !usd) return; // порожній / службовий рядок
+    if (!type && !uah && !cash && !tov && !fop && !usd) return; // порожній / службовий рядок
     total++;
     if (!d) return void skipped.push({ row: i, reason: 'немає дати' });
     if (!(ART_TYPES as readonly string[]).includes(type)) return void skipped.push({ row: i, reason: `невідома стаття «${type}»` });
@@ -119,7 +122,9 @@ export function parseCashSheet(ws: ExcelJS.Worksheet): { rows: CashImportRow[]; 
     const base = { date: d, type, cat: str(g(col.cat)), obj: str(g(col.obj)), counterparty: str(g(col.cp)), note: str(g(col.note)) };
     if (uah) out.push({ ...base, account: 'Карта', sum: Math.round(uah * 100) / 100 });
     if (cash) out.push({ ...base, account: 'Готівка', sum: Math.round(cash * 100) / 100 });
-    if (!uah && !cash) skipped.push({ row: i, reason: 'немає суми' });
+    if (tov) out.push({ ...base, account: 'ТОВ', sum: Math.round(tov * 100) / 100 });
+    if (fop) out.push({ ...base, account: 'ФОП', sum: Math.round(fop * 100) / 100 });
+    if (!uah && !cash && !tov && !fop) skipped.push({ row: i, reason: 'немає суми' });
   });
   return { rows: out, skipped, total };
 }

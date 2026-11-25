@@ -26,10 +26,6 @@ import { completeStage, makePlan, syncMeasureTasks } from './plan.js';
 export function precheck(o: OrderAgg, to: Status, s: Settings): string | null {
   const { calc, items } = compute(o, s);
   switch (to) {
-    case 'Замір виконано':
-      if (!o.items.length && !o.files.length)
-        return 'Додайте хоча б один виріб у вкладці «Попередній прорахунок» або прикріпіть фото/файл заміру.';
-      return null;
     case 'Очікує рішення клієнта': {
       if (!o.items.length) return 'Додайте хоча б один виріб із ціною.';
       const no = o.items.filter((i) => !((items.get(i.id)?.price ?? 0) > 0));
@@ -171,8 +167,7 @@ export async function moveStatus(
     }
   }
   for (const cs of crossed) {
-    const st = STATUS_COMPLETES[cs];
-    if (st) await completeStage(c, o.id, st, today);
+    for (const st of STATUS_COMPLETES[cs] ?? []) await completeStage(c, o.id, st, today);
   }
 
   let text = `Статус «${from}» → «${to}»`;
@@ -187,7 +182,6 @@ export async function moveStatus(
   }
 
   // Записи-сповіщення менеджеру
-  if (to === 'Замір виконано') await writeLog(c, { userId, orderId: o.id, folder: 'zamir', text: 'Сповіщення менеджеру: замір виконано' });
   if (to === 'Готово до відвантаження')
     await writeLog(c, { userId, orderId: o.id, folder: 'mont', text: 'Сповіщення менеджеру: готово до відвантаження' });
   if (to === 'Змонтовано') {

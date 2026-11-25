@@ -1,5 +1,7 @@
 /** Позики і рахунки до оплати: розрахунки, спільні для сервера й інтерфейсу. */
 
+import { fmtDate } from './format.js';
+
 export interface LoanOpInput {
   id: number;
   date: string;
@@ -66,9 +68,9 @@ export function payableState(amount: number, paid: number, dueDate: string | nul
 }
 
 /** «Призначення платежу» для банку. */
-export function paymentPurpose(p: { purpose: string; invoice: string | null; vat: number; amount: number }, sum: number): string {
+export function paymentPurpose(p: { purpose: string; invoice: string | null; invoiceDate?: string | null; vat: number; amount: number }, sum: number): string {
   const money = (n: number) => n.toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   // при частковій оплаті ПДВ — пропорційно частці від суми рахунку
   const vat = p.vat > 0 ? `, у т.ч. ПДВ ${money(r2((p.vat * sum) / p.amount))} грн` : ', без ПДВ';
-  return `Оплата ${p.purpose || 'за товари/послуги'}${p.invoice ? ` згідно рах. ${p.invoice}` : ''}${vat}`;
+  return `Оплата ${p.purpose || 'за товари/послуги'}${p.invoice ? ` згідно рах. ${p.invoice}${p.invoiceDate ? ` від ${fmtDate(p.invoiceDate)}` : ''}` : ''}${vat}`;
 }

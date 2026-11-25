@@ -41,7 +41,7 @@ describe('облік (10.1)', () => {
     expect(exp).toMatchObject({ sum: -4000, obj: `№${o.num} · Олена`, line: 'orderCost', account: 'Карта' });
     const pay = r.rows.find((x: { derived: string | null }) => x.derived === 'оплата');
     expect(pay).toMatchObject({ sum: 6000, type: 'Дохід', cat: 'Замовлення', account: 'Готівка', line: 'income', counterparty: 'Замовник' });
-    expect(r.balances).toEqual({ card: -4000, cash: 6000, total: 2000 });
+    expect(r.balances).toEqual({ by: { 'Готівка': 6000, 'ТОВ': 0, 'Карта': -4000, 'ФОП': 0 }, total: 2000 });
     expect(r).toMatchObject({ inflow: 6000, outflow: -4000 });
     expect(norm((await logTexts()).at(-1)!)).toBe('Облік: Витрата/Замовлення -4 000 грн · ДСП'.replace('-', '−').replace('−', '-'));
   });
@@ -146,7 +146,7 @@ describe('оплати, борги, дизайнерам, нарахування
     await a.post(`/api/orders/${o.id}/status`, { to: 'Договір / аванс отримано', mode: 'jump' });
     r = (await a.get('/api/money/designers')).body;
     expect(r.rows[0]).toMatchObject({ accrued: 3000, paid: 0, owe: 3000, contracts: 1, sales: 30000 });
-    await a.post(`/api/money/designers/${des.id}/payouts`, { sum: 3000, method: 'рахунок', date: today });
+    await a.post(`/api/money/designers/${des.id}/payouts`, { sum: 3000, method: 'рахунок ТОВ', date: today });
     r = (await a.get('/api/money/designers')).body;
     expect(r.rows[0]).toMatchObject({ paid: 3000, owe: 0 });
     expect(r.paidThisMonth).toBe(3000);
@@ -245,7 +245,7 @@ describe('імпорт з Excel (10.1, 10.2)', () => {
     });
     const r = await a.agent.post('/api/finance/cash/import').set('X-VUDO', '1').attach('file', buf, 'облік.xlsx');
     expect(r.status).toBe(200);
-    expect(r.body).toMatchObject({ rows: 5, added: 6, duplicates: 0, skipped: [], card: 37212, cash: -300 });
+    expect(r.body).toMatchObject({ rows: 5, added: 6, duplicates: 0, skipped: [], byAccount: { 'Готівка': -300, 'ТОВ': 0, 'Карта': 37212, 'ФОП': 0 } });
     // однакові операції в одному файлі — обидві справжні
     expect((await a.get('/api/finance/cash?month=')).body.rows.filter((x: { note: string }) => x.note === 'Реклама ФБ')).toHaveLength(2);
     const cash = (await a.get('/api/finance/cash?month=')).body.rows.filter((x: { derived: string | null }) => !x.derived);
@@ -284,10 +284,10 @@ describe('позики і рахунки до оплати', () => {
     const { a } = await setup();
     await a.post('/api/finance/loans', { lender: 'Єфімов Дем’ян', contract: 'ПФД №1', limit: 50000 });
     const id = (await a.get('/api/finance/loans')).body.rows[0].id;
-    await a.post(`/api/finance/loans/${id}/ops`, { date: '2026-10-10', kind: 'in', sum: 6000, method: 'безготівково', dueDate: '2026-10-15' });
-    await a.post(`/api/finance/loans/${id}/ops`, { date: '2026-10-12', kind: 'in', sum: 4000, method: 'готівка', dueDate: '2099-01-01', toCash: false });
-    expect((await a.post(`/api/finance/loans/${id}/ops`, { date: today, kind: 'out', sum: 20000, method: 'готівка' })).body.error).toMatch(/не більше боргу ТОВ/);
-    await a.post(`/api/finance/loans/${id}/ops`, { date: today, kind: 'out', sum: 1000, method: 'безготівково' });
+    await a.post(`/api/finance/loans/${id}/ops`, { date: '2026-10-10', kind: 'in', sum: 6000, method: 'ТОВ', dueDate: '2026-10-15' });
+    await a.post(`/api/finance/loans/${id}/ops`, { date: '2026-10-12', kind: 'in', sum: 4000, method: 'Готівка', dueDate: '2099-01-01', toCash: false });
+    expect((await a.post(`/api/finance/loans/${id}/ops`, { date: today, kind: 'out', sum: 20000, method: 'Готівка' })).body.error).toMatch(/не більше боргу ТОВ/);
+    await a.post(`/api/finance/loans/${id}/ops`, { date: today, kind: 'out', sum: 1000, method: 'ТОВ' });
     const r = (await a.get('/api/finance/loans')).body;
     expect(r.rows[0]).toMatchObject({ deposited: 10000, returned: 1000, debt: 9000, overdue: 5000, limitLeft: 41000 });
     expect(r).toMatchObject({ debt: 9000, overdue: 5000 });
@@ -318,5 +318,52 @@ describe('позики і рахунки до оплати', () => {
     expect(costs).toMatchObject({ fact: 5000, materials: 5000 });
     await a.post(`/api/finance/payables/${id}/pay`, { date: today, sum: 7000, account: 'Готівка' });
     expect((await a.get('/api/finance/payables')).body.rows[0]).toMatchObject({ left: 0, status: 'Сплачено' });
+  });
+
+  it('каси ТОВ і ФОП: залишки окремо; оплата клієнта на рахунок ТОВ', async () => {
+    const { a, o } = await setup();
+    await a.post(`/api/orders/${o.id}/payments`, { sum: 2500, type: 'аванс', method: 'рахунок ТОВ', date: today });
+    await a.post(`/api/orders/${o.id}/payments`, { sum: 700, type: 'аванс', method: 'рахунок ФОП', date: today });
+    await a.post('/api/finance/cash', expense(o.id, 500, { account: 'ТОВ' }));
+    expect((await a.get('/api/finance/cash')).body.balances).toEqual({ by: { 'Готівка': 6000, 'ТОВ': 2000, 'Карта': 0, 'ФОП': 700 }, total: 8700 });
+  });
+
+  it('«Рекламація» — окремий рядок P&L', async () => {
+    const { a } = await setup();
+    await a.post('/api/finance/cash', { date: today, type: 'Витрата', cat: 'Рекламація', obj: 'Переробка', orderId: null, counterparty: '', note: '', account: 'ФОП', amount: 900 });
+    const p = (await a.get(`/api/finance/pnl?year=${today.slice(0, 4)}`)).body;
+    expect(p.fact[today.slice(0, 7)].claim).toBe(-900);
+  });
+
+  it('майбутні витрати: незакриті рахунки (не реєстр) і сплачене за місяць', async () => {
+    const { a } = await setup();
+    await (await import('../src/db.js')).pool.query('UPDATE fixed_costs SET active = false');
+    const m = today.slice(0, 7);
+    const get = async () => (await a.get(`/api/finance/pnl?year=${today.slice(0, 4)}`)).body.future[m];
+    expect(await get()).toEqual({ paid: 0, unpaid: 0 });
+    const bill = { counterparty: 'Майстер', purpose: 'за роботу', amount: 1000, cat: 'Інші', obj: 'Цех' };
+    await a.post('/api/finance/payables', { ...bill, dueDate: today });
+    await a.post('/api/finance/payables', { ...bill, amount: 300, kind: 'registry', invoice: '7', invoiceDate: '2026-11-20' });
+    expect(await get()).toEqual({ paid: 0, unpaid: 1000 });
+    const bills = (await a.get('/api/finance/payables')).body.rows;
+    expect(bills).toHaveLength(1);
+    await a.post(`/api/finance/payables/${bills[0].id}/pay`, { date: today, sum: 400, account: 'ТОВ' });
+    expect(await get()).toEqual({ paid: 400, unpaid: 600 });
+    const reg = (await a.get('/api/finance/payables?kind=registry')).body.rows;
+    expect(reg).toHaveLength(1);
+    expect(reg[0]).toMatchObject({ no: 1, left: 300, status: 'До сплати', purposeText: 'Оплата за роботу згідно рах. 7 від 20.11.2026, без ПДВ' });
+    await (await import('../src/db.js')).pool.query('UPDATE fixed_costs SET active = true');
+  });
+
+  it('позика: примітка і спосіб змінюються, каса в обліку — теж', async () => {
+    const { a } = await setup();
+    await a.post('/api/finance/loans', { lender: 'Єфімов', limit: null });
+    const id = (await a.get('/api/finance/loans')).body.rows[0].id;
+    await a.post(`/api/finance/loans/${id}/ops`, { date: today, kind: 'in', sum: 500, method: 'Карта', note: 'на ДСП' });
+    const op = (await a.get('/api/finance/loans')).body.rows[0].ops[0];
+    expect(op).toMatchObject({ method: 'Карта', note: 'на ДСП' });
+    expect((await a.patch(`/api/finance/loan-ops/${op.id}`, { note: 'на фурнітуру', method: 'ТОВ' })).status).toBe(200);
+    expect((await a.get('/api/finance/loans')).body.rows[0].ops[0]).toMatchObject({ method: 'ТОВ', note: 'на фурнітуру' });
+    expect((await a.get('/api/finance/cash')).body.balances.by['ТОВ']).toBe(500);
   });
 });

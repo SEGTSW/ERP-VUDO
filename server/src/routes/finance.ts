@@ -325,6 +325,39 @@ financeRouter.patch('/finance/orders/:id/opex', async (req, res) => {
 
 /* ---------- 10.2 P&L ---------- */
 
+/**
+ * Майбутні витрати за місяцями:
+ *  - paid — уже сплачено: витрати обліку, що входять у P&L;
+ *  - unpaid — ще не закрито: залишки рахунків до оплати (за місяцем строку; без строку — поточний місяць)
+ *    + несплачена частина активних щомісячних / щотижневих постійних витрат (поточний і наступні місяці).
+ * Реєстр платежів сюди не входить — це ті самі рахунки, передані бухгалтеру.
+ */
+async function futureCosts(db: pg.Pool, months: string[], rows: { date: string; type: string; line: string; sum: number }[], today: string) {
+  const cur = today.slice(0, 7);
+  const out: Record<string, { paid: number; unpaid: number }> = Object.fromEntries(months.map((m) => [m, { paid: 0, unpaid: 0 }]));
+  for (const r of rows) if (r.type === 'Витрата' && r.line !== 'none') out[r.date.slice(0, 7)]!.paid -= r.sum;
+  const bills = await db.query<{ month: string; unpaid: number }>(
+    `SELECT coalesce(to_char(p.due_date, 'YYYY-MM'), $1) AS month,
+            sum(greatest(p.amount - coalesce((SELECT sum(x.sum) FROM payable_payments x WHERE x.payable_id = p.id), 0), 0))::numeric AS unpaid
+       FROM payables p WHERE p.kind = 'bill' AND NOT p.cancelled GROUP BY 1`,
+    [cur],
+  );
+  for (const b of bills.rows) if (out[b.month]) out[b.month]!.unpaid += b.unpaid;
+  const fixed = await db.query<{ id: number; amount: number; period: string }>(`SELECT id, amount, period FROM fixed_costs WHERE active AND period IN ('month', 'week')`);
+  const paid = await db.query<{ id: number; month: string; s: number }>(
+    `SELECT fixed_id AS id, to_char(date, 'YYYY-MM') AS month, -sum(sum)::numeric AS s FROM cash_ops WHERE fixed_id IS NOT NULL GROUP BY 1, 2`,
+  );
+  for (const m of months) {
+    if (m < cur) continue;
+    for (const f of fixed.rows) out[m]!.unpaid += Math.max(0, perMonth(f.amount, f.period) - (paid.rows.find((x) => x.id === f.id && x.month === m)?.s ?? 0));
+  }
+  for (const x of Object.values(out)) {
+    x.paid = Math.round(x.paid * 100) / 100;
+    x.unpaid = Math.round(x.unpaid * 100) / 100;
+  }
+  return out;
+}
+
 financeRouter.get('/finance/pnl', async (req, res) => {
   const today = kyivToday();
   const year = z.coerce.number().int().min(2000).max(2100).default(Number(today.slice(0, 4))).parse(req.query.year);
@@ -337,6 +370,7 @@ financeRouter.get('/finance/pnl', async (req, res) => {
     f[r.line] = Math.round(((f[r.line] ?? 0) + r.sum) * 100) / 100;
     f.net = Math.round((f.net! + r.sum) * 100) / 100;
   }
+  const future = await futureCosts(pool, months, rows, today);
   // (20) Залишок = Σ усіх операцій до кінця місяця: стартовий — усе до 1 січня
   const before = (await cashRows(pool, { to: `${year - 1}-12-31` })).reduce((s, r) => s + r.sum, 0);
   const plan = await pool.query<{ month: string; line: string; amount: number }>(
@@ -355,6 +389,7 @@ financeRouter.get('/finance/pnl', async (req, res) => {
     months,
     fact,
     plan: planBy,
+    future,
     opening: Math.round(before * 100) / 100,
     years: [...new Set([...years.rows.map((x) => x.y), Number(today.slice(0, 4))])].sort(),
     today,
@@ -548,8 +583,7 @@ financeRouter.post('/finance/cash/import', async (req, res) => {
     rows: parsed.total,
     ...r,
     skipped: parsed.skipped,
-    card: parsed.rows.filter((x) => x.account === 'Карта').reduce((t, x) => t + x.sum, 0),
-    cash: parsed.rows.filter((x) => x.account === 'Готівка').reduce((t, x) => t + x.sum, 0),
+    byAccount: Object.fromEntries(ACCOUNTS.map((a) => [a, Math.round(parsed.rows.filter((x) => x.account === a).reduce((t, x) => t + x.sum, 0) * 100) / 100])),
   });
 });
 

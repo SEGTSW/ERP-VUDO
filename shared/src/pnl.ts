@@ -12,6 +12,7 @@ export const LINE_KIND: Record<PnlLine, 'in' | 'out' | 'mix' | 'none'> = {
   tax: 'out',
   logistics: 'out',
   collab: 'out',
+  claim: 'out',
   credit: 'mix',
   working: 'out',
   invPlus: 'in',
@@ -22,7 +23,7 @@ export const LINE_KIND: Record<PnlLine, 'in' | 'out' | 'mix' | 'none'> = {
 };
 
 /** Операційні рядки, що входять у «Результат операційної діяльності». */
-export const OPEX_LINES: PnlLine[] = ['admin', 'payroll', 'other', 'marketing', 'tax', 'logistics', 'collab', 'credit', 'working'];
+export const OPEX_LINES: PnlLine[] = ['admin', 'payroll', 'other', 'marketing', 'tax', 'logistics', 'collab', 'claim', 'credit', 'working'];
 export const INVEST_LINES: PnlLine[] = ['invPlus', 'invMinus', 'dividends', 'loan'];
 /** Постійні статті для підказки «за фактом 3 міс.» (ТЗ 14, п. 13). */
 export const FIXED_LINES: PnlLine[] = ['admin', 'payroll', 'other', 'marketing', 'tax'];

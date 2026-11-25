@@ -62,11 +62,12 @@ export function nextStep(o: OrderAgg, s: Settings, names: Map<number, string>, t
   }
   const noPrice = !o.items.length || o.items.some((i) => !((items.get(i.id)?.price ?? 0) > 0));
   const installers = o.installerIds.map((id) => names.get(id)).filter(Boolean).join(', ');
+  // Замір виконано — за етапом плану (замірник позначає в «Мій день» або в плані)
+  const measured = o.tasks.some((t) => t.stage === 'Замір' && t.progress >= 100);
   const map: Record<string, string> = {
     'Звернення': 'Зробити прорахунок',
     'Прорахунок': noPrice ? 'Вказати ціни виробів' : 'Призначити замір',
-    'Замір призначено': `Замір ${ddmm(o.measureDate)}${o.measurerId ? ` · ${names.get(o.measurerId) ?? ''}` : ''}`,
-    'Замір виконано': noPrice ? 'Уточнити ціни виробів' : 'Надіслати пропозицію',
+    'Замір': measured ? (noPrice ? 'Уточнити ціни виробів' : 'Надіслати пропозицію') : `Замір ${ddmm(o.measureDate)}${o.measurerId ? ` · ${names.get(o.measurerId) ?? ''}` : ''}`,
     'Очікує рішення клієнта': 'Зателефонувати клієнту',
     'Проєктування': 'Погодити проєкт з клієнтом',
     'Проєкт погоджено': 'Підписати договір, отримати аванс',

@@ -37,8 +37,8 @@ describe('налаштування (13)', () => {
   it('норми: зміна і «без норми»; некоректні значення відхиляються', async () => {
     await makeUser('admin', ['Адмін']);
     const s = await loginAs('admin');
-    const res = await s.patch('/api/settings', { norms: { 'Звернення': 2, 'Замір виконано': 4 } });
-    expect(res.body.norms).toEqual({ 'Звернення': 2, 'Замір виконано': 4 });
+    const res = await s.patch('/api/settings', { norms: { 'Звернення': 2, 'Замір': 4 } });
+    expect(res.body.norms).toEqual({ 'Звернення': 2, 'Замір': 4 });
     expect((await logTexts()).at(-1)).toContain('«Звернення»: 1 → 2');
     expect((await s.patch('/api/settings', { avansPct: 150 })).status).toBe(400);
     expect((await s.patch('/api/settings', { unknown: 1 })).status).toBe(400);
@@ -47,7 +47,7 @@ describe('налаштування (13)', () => {
 
 describe('журнал і повідомлення (12)', () => {
   async function seedLog(by: number) {
-    await writeLog(pool, { userId: by, folder: 'order', text: 'Статус «Звернення» → «Замір призначено»' });
+    await writeLog(pool, { userId: by, folder: 'order', text: 'Статус «Звернення» → «Замір»' });
     await writeLog(pool, { userId: by, folder: 'fin', finScope: 'pay', text: 'Внесено 10 000 грн' });
     await writeLog(pool, { userId: by, folder: 'fin', finScope: 'report', text: 'Облік: Витрата/Цех −5 000 грн' });
   }
@@ -60,8 +60,8 @@ describe('журнал і повідомлення (12)', () => {
     const texts = async (login: string) =>
       ((await (await loginAs(login)).get('/api/log')).body.entries as { text: string }[]).map((e) => e.text);
     expect(await texts('admin')).toHaveLength(3);
-    expect(await texts('iryna')).toEqual(['Внесено 10 000 грн', 'Статус «Звернення» → «Замір призначено»']);
-    expect(await texts('stepan')).toEqual(['Статус «Звернення» → «Замір призначено»']);
+    expect(await texts('iryna')).toEqual(['Внесено 10 000 грн', 'Статус «Звернення» → «Замір»']);
+    expect(await texts('stepan')).toEqual(['Статус «Звернення» → «Замір»']);
   });
 
   it('лічильники нових: власні записи не нові; відкриття папки позначає прочитаним', async () => {

@@ -1,6 +1,6 @@
 import { Fragment, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { PAYMENT_METHODS, PAYMENT_TYPES, addDays, fmtDate, kyivToday, money, type Status } from '@vudo/shared';
+import { PAYMENT_METHODS, addDays, fmtDate, kyivToday, money, type Status } from '@vudo/shared';
 import { api, errorText } from '../api';
 import { useDrawer } from '../orders/hooks';
 import { useManagers } from '../pages/Orders';
@@ -65,100 +65,6 @@ function ManagerSelect({ value, onChange }: { value: string; onChange: (v: strin
         ))}
       </select>
     </label>
-  );
-}
-
-/* ---------- 10.3 Оплати клієнтів ---------- */
-
-interface PayData {
-  rows: { id: number; date: string; sum: number; type: string; method: string; orderId: number; num: string; client: string; managerName: string; byName: string | null }[];
-  total: number;
-  count: number;
-  byMethod: Record<string, number>;
-}
-
-export function PaymentsTab() {
-  const { openOrder } = useDrawer();
-  const period = usePeriod();
-  const [f, setF] = useState({ method: '', type: '', manager: '' });
-  const qs = new URLSearchParams({ ...period.p, method: f.method, type: f.type, ...(f.manager ? { manager: f.manager } : {}) });
-  const q = useQuery({ queryKey: ['finance', 'payments', qs.toString()], queryFn: () => api.get<PayData>(`/money/payments?${qs}`) });
-  const d = q.data;
-  return (
-    <>
-      <PeriodBar period={period}>
-        <label className="f">
-          Спосіб
-          <select value={f.method} onChange={(e) => setF({ ...f, method: e.target.value })}>
-            <option value="">Усі</option>
-            {PAYMENT_METHODS.map((m) => (
-              <option key={m}>{m}</option>
-            ))}
-          </select>
-        </label>
-        <label className="f">
-          Тип
-          <select value={f.type} onChange={(e) => setF({ ...f, type: e.target.value })}>
-            <option value="">Усі</option>
-            {PAYMENT_TYPES.map((m) => (
-              <option key={m}>{m}</option>
-            ))}
-          </select>
-        </label>
-        <ManagerSelect value={f.manager} onChange={(v) => setF({ ...f, manager: v })} />
-      </PeriodBar>
-      <div className="sums" style={{ marginBottom: 14 }}>
-        <div>
-          <small>Надійшло за період</small>
-          <b>{money(d?.total ?? 0)}</b>
-        </div>
-        <div>
-          <small>Оплат</small>
-          <b>{d?.count ?? 0}</b>
-        </div>
-        {PAYMENT_METHODS.map((m) => (
-          <div key={m}>
-            <small>{m}</small>
-            <b>{money(d?.byMethod[m] ?? 0)}</b>
-          </div>
-        ))}
-      </div>
-      <div className="tbl-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Дата</th>
-              <th>Замовлення</th>
-              <th>Клієнт</th>
-              <th>Тип</th>
-              <th>Спосіб</th>
-              <th>Менеджер</th>
-              <th>Вніс(ла)</th>
-              <th className="r">Сума</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(d?.rows ?? []).map((p) => (
-              <RowLink key={p.id} onOpen={() => openOrder(p.orderId, 'pay')}>
-                <td className="num">{fmtDate(p.date)}</td>
-                <td className="num">№{p.num}</td>
-                <td>{p.client}</td>
-                <td>{p.type}</td>
-                <td>{p.method}</td>
-                <td>{p.managerName}</td>
-                <td>{p.byName}</td>
-                <td className={`r num ${p.type === 'повернення' ? 'debt' : ''}`}>
-                  {p.type === 'повернення' ? '−' : ''}
-                  {money(p.sum)}
-                </td>
-              </RowLink>
-            ))}
-          </tbody>
-        </table>
-        {q.isPending && <div className="empty">Завантаження…</div>}
-        {d && !d.rows.length && <div className="empty">За цей період оплат немає. Змініть дати або фільтри.</div>}
-      </div>
-    </>
   );
 }
 
@@ -440,7 +346,7 @@ function PayoutModal({ r, onClose }: { r: DesRow; onClose: () => void }) {
   );
 }
 
-/* ---------- 10.6 Нарахування ---------- */
+/* ---------- 10.6 Нарахування ЗП ---------- */
 
 export function SalariesTab() {
   const qc = useQueryClient();

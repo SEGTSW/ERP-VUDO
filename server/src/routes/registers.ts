@@ -6,7 +6,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import type pg from 'pg';
-import { fmtDate, kyivToday, loanSummary, money, payableState, paymentPurpose } from '@vudo/shared';
+import { ACCOUNTS, fmtDate, kyivToday, loanSummary, money, payableState, paymentPurpose } from '@vudo/shared';
 import { pool, tx } from '../db.js';
 import { badRequest, notFound } from '../errors.js';
 import { me, requireOwner } from '../auth/middleware.js';
@@ -120,7 +120,7 @@ registersRouter.post('/finance/loans/:id/ops', async (req, res) => {
       date,
       kind: z.enum(['in', 'out']),
       sum: z.number().positive('Вкажіть суму більше 0.').max(1_000_000_000),
-      method: z.enum(['безготівково', 'готівка']),
+      method: z.enum(ACCOUNTS),
       doc: text(300),
       note: text(1000),
       dueDate: date.nullish().transform((v) => v || null),
@@ -150,8 +150,8 @@ registersRouter.post('/finance/loans/:id/ops', async (req, res) => {
           cat: b.kind === 'in' ? 'Поповнення' : 'Зняття',
           obj: 'VUDO',
           counterparty: loan.lender,
-          note: [b.kind === 'in' ? 'Поворотна фіндопомога' : 'Повернення фіндопомоги', b.doc].filter(Boolean).join(' · '),
-          account: b.method === 'готівка' ? 'Готівка' : 'Карта',
+          note: [b.kind === 'in' ? 'Поворотна фіндопомога' : 'Повернення фіндопомоги', b.doc, b.note].filter(Boolean).join(' · '),
+          account: b.method,
           sum: b.kind === 'in' ? sum : -sum,
         },
         u.id,
@@ -165,10 +165,33 @@ registersRouter.post('/finance/loans/:id/ops', async (req, res) => {
       userId: u.id,
       folder: 'fin',
       finScope: 'report',
-      text: `Позики «${loan.lender}»: ${b.kind === 'in' ? 'надходження' : 'повернення'} ${money(sum)} від ${fmtDate(b.date)}${b.kind === 'in' && b.dueDate ? `, повернути до ${fmtDate(b.dueDate)}` : ''}${b.toCash ? '' : ' (без запису в облік)'}`,
+      text: `Позики «${loan.lender}»: ${b.kind === 'in' ? 'надходження' : 'повернення'} ${money(sum)} від ${fmtDate(b.date)}${b.kind === 'in' && b.dueDate ? `, повернути до ${fmtDate(b.dueDate)}` : ''}, спосіб: ${b.method}${b.toCash ? '' : ' (без запису в облік)'}`,
     });
   });
   res.status(201).json({ ok: true });
+});
+
+/** Примітка і спосіб внесення операції; спосіб міняє й касу пов'язаного запису в обліку. */
+registersRouter.patch('/finance/loan-ops/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  const b = z.object({ note: text(1000), method: z.enum(ACCOUNTS).optional() }).parse(req.body);
+  const u = me(req);
+  await tx(async (c) => {
+    const r = await c.query<{ method: string; note: string | null; date: string; cash_op_id: number | null; lender: string }>(
+      `SELECT o.method, o.note, o.date, o.cash_op_id, l.lender FROM loan_ops o JOIN loans l ON l.id = o.loan_id WHERE o.id = $1 FOR UPDATE OF o`,
+      [id],
+    );
+    const o = r.rows[0];
+    if (!o) throw notFound('Операцію не знайдено.');
+    const method = b.method ?? o.method;
+    await c.query('UPDATE loan_ops SET note = $2, method = $3 WHERE id = $1', [id, b.note, method]);
+    if (o.cash_op_id && b.method && method !== o.method) {
+      await c.query('UPDATE cash_ops SET account = $2, updated_at = now(), updated_by = $3 WHERE id = $1', [o.cash_op_id, method, u.id]);
+    }
+    const ch = [diffLine('примітка', o.note, b.note), diffLine('спосіб', o.method, method)].filter(Boolean);
+    if (ch.length) await writeLog(c, { userId: u.id, folder: 'fin', finScope: 'report', text: `Позики «${o.lender}»: операція від ${fmtDate(o.date)} — ${ch.join('; ')}` });
+  });
+  res.json({ ok: true });
 });
 
 /** Видалення помилково внесеної операції позики (разом з її записом в обліку). */
@@ -194,15 +217,21 @@ registersRouter.delete('/finance/loan-ops/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
-/* ---------- Рахунки до оплати ---------- */
+/* ---------- Рахунки до оплати і реєстр платежів (kind) ---------- */
 
-registersRouter.get('/finance/payables', async (_req, res) => {
+const kindSchema = z.enum(['bill', 'registry']).default('bill');
+const KIND_NAME = { bill: 'Рахунки до оплати', registry: 'Реєстр платежів' } as const;
+
+registersRouter.get('/finance/payables', async (req, res) => {
+  const kind = kindSchema.parse(req.query.kind);
   const today = kyivToday();
   const r = await pool.query(
-    `SELECT p.id, p.counterparty, p.tax_id AS "taxId", p.iban, p.purpose, p.invoice, p.amount, p.vat, p.due_date AS "dueDate",
+    `SELECT p.id, p.counterparty, p.tax_id AS "taxId", p.iban, p.purpose, p.invoice, p.invoice_date AS "invoiceDate",
+            row_number() OVER (ORDER BY p.id)::int AS no, p.amount, p.vat, p.due_date AS "dueDate",
             p.priority, p.cat, p.obj, p.order_id AS "orderId", o.num AS "orderNum", p.note, p.cancelled, p.created_at AS "createdAt",
             coalesce((SELECT sum(x.sum) FROM payable_payments x WHERE x.payable_id = p.id), 0)::numeric AS paid
-       FROM payables p LEFT JOIN orders o ON o.id = p.order_id ORDER BY p.id DESC`,
+       FROM payables p LEFT JOIN orders o ON o.id = p.order_id WHERE p.kind = $1 ORDER BY p.id DESC`,
+    [kind],
   );
   const pays = await pool.query(
     `SELECT x.id, x.payable_id AS "payableId", x.date, x.sum, x.account, x.cash_op_id AS "cashOpId", u.name AS "byName"
@@ -244,6 +273,7 @@ const payableSchema = z.object({
     .refine((v) => !v || /^UA\d{27}$/.test(v), 'IBAN: UA і 27 цифр.'),
   purpose: z.string().trim().max(500).default(''),
   invoice: text(200),
+  invoiceDate: date.nullish().transform((v) => v || null),
   amount: z.number().positive('Вкажіть суму більше 0.').max(1_000_000_000),
   vat: z.number().min(0).max(1_000_000_000).default(0),
   dueDate: date.nullish().transform((v) => v || null),
@@ -255,20 +285,20 @@ const payableSchema = z.object({
 });
 
 registersRouter.post('/finance/payables', async (req, res) => {
-  const b = payableSchema.parse(req.body);
+  const b = payableSchema.extend({ kind: kindSchema }).parse(req.body);
   if (b.vat > b.amount) throw badRequest('ПДВ не може бути більшим за суму.', 'vat');
   const u = me(req);
   await tx(async (c) => {
     await c.query(
-      `INSERT INTO payables (counterparty, tax_id, iban, purpose, invoice, amount, vat, due_date, priority, cat, obj, order_id, note, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
-      [b.counterparty, b.taxId, b.iban, b.purpose, b.invoice, b.amount, b.vat, b.dueDate, b.priority, b.cat, b.obj, b.orderId, b.note, u.id],
+      `INSERT INTO payables (counterparty, tax_id, iban, purpose, invoice, amount, vat, due_date, priority, cat, obj, order_id, note, created_by, kind, invoice_date)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+      [b.counterparty, b.taxId, b.iban, b.purpose, b.invoice, b.amount, b.vat, b.dueDate, b.priority, b.cat, b.obj, b.orderId, b.note, u.id, b.kind, b.invoiceDate],
     );
     await writeLog(c, {
       userId: u.id,
       folder: 'fin',
       finScope: 'report',
-      text: `Рахунки до оплати: новий — «${b.counterparty}», ${money(b.amount)}${b.dueDate ? `, оплатити до ${fmtDate(b.dueDate)}` : ''}`,
+      text: `${KIND_NAME[b.kind]}: новий — «${b.counterparty}», ${money(b.amount)}${b.dueDate ? `, оплатити до ${fmtDate(b.dueDate)}` : ''}`,
     });
   });
   res.status(201).json({ ok: true });
@@ -288,6 +318,7 @@ registersRouter.patch('/finance/payables/:id', async (req, res) => {
       iban: b.iban !== undefined ? b.iban : x.iban,
       purpose: b.purpose ?? x.purpose,
       invoice: b.invoice !== undefined ? b.invoice : x.invoice,
+      invoiceDate: b.invoiceDate !== undefined ? b.invoiceDate : x.invoice_date,
       amount: b.amount ?? Number(x.amount),
       vat: b.vat ?? Number(x.vat),
       dueDate: b.dueDate !== undefined ? b.dueDate : x.due_date,
@@ -301,8 +332,8 @@ registersRouter.patch('/finance/payables/:id', async (req, res) => {
     if (n.vat > n.amount) throw badRequest('ПДВ не може бути більшим за суму.', 'vat');
     await c.query(
       `UPDATE payables SET counterparty=$2, tax_id=$3, iban=$4, purpose=$5, invoice=$6, amount=$7, vat=$8, due_date=$9, priority=$10,
-              cat=$11, obj=$12, order_id=$13, note=$14, cancelled=$15 WHERE id = $1`,
-      [id, n.counterparty, n.taxId, n.iban, n.purpose, n.invoice, n.amount, n.vat, n.dueDate, n.priority, n.cat, n.obj, n.orderId, n.note, n.cancelled],
+              cat=$11, obj=$12, order_id=$13, note=$14, cancelled=$15, invoice_date=$16 WHERE id = $1`,
+      [id, n.counterparty, n.taxId, n.iban, n.purpose, n.invoice, n.amount, n.vat, n.dueDate, n.priority, n.cat, n.obj, n.orderId, n.note, n.cancelled, n.invoiceDate],
     );
     const ch = [
       diffLine('контрагент', x.counterparty, n.counterparty),
@@ -311,7 +342,7 @@ registersRouter.patch('/finance/payables/:id', async (req, res) => {
       diffLine('пріоритет', x.priority, n.priority),
       x.cancelled !== n.cancelled ? (n.cancelled ? 'скасовано' : 'відновлено') : null,
     ].filter(Boolean);
-    if (ch.length) await writeLog(c, { userId: u.id, folder: 'fin', finScope: 'report', text: `Рахунок «${n.counterparty}»: ${ch.join('; ')}` });
+    if (ch.length) await writeLog(c, { userId: u.id, folder: 'fin', finScope: 'report', text: `${KIND_NAME[x.kind as 'bill']} «${n.counterparty}»: ${ch.join('; ')}` });
   });
   res.json({ ok: true });
 });
@@ -320,7 +351,7 @@ registersRouter.patch('/finance/payables/:id', async (req, res) => {
 registersRouter.post('/finance/payables/:id/pay', async (req, res) => {
   const id = Number(req.params.id);
   const b = z
-    .object({ date, sum: z.number().positive('Вкажіть суму більше 0.').max(1_000_000_000), account: z.enum(['Карта', 'Готівка']), toCash: z.boolean().default(true) })
+    .object({ date, sum: z.number().positive('Вкажіть суму більше 0.').max(1_000_000_000), account: z.enum(ACCOUNTS), toCash: z.boolean().default(true) })
     .parse(req.body);
   const u = me(req);
   const today = kyivToday();
@@ -364,7 +395,7 @@ registersRouter.post('/finance/payables/:id/pay', async (req, res) => {
       orderId: p.order_id,
       folder: 'fin',
       finScope: 'report',
-      text: `Рахунок «${p.counterparty}»: оплачено ${money(sum)}${st.left - sum > 0.001 ? `, залишок ${money(st.left - sum)}` : ' — повністю'}${b.toCash ? '' : ' (без запису в облік)'}`,
+      text: `${KIND_NAME[p.kind as 'bill']} «${p.counterparty}»: оплачено ${money(sum)}${st.left - sum > 0.001 ? `, залишок ${money(st.left - sum)}` : ' — повністю'}${b.toCash ? '' : ' (без запису в облік)'}`,
     });
   });
   res.status(201).json({ ok: true });

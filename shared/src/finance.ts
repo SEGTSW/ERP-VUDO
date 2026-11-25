@@ -1,5 +1,9 @@
 /** Фінанси: статті, рядки P&L, правило пошуку рядка (ТЗ 10.1, 10.2, 10.8). */
 
+import type { PAYMENT_METHODS } from './constants.js';
+
+type PaymentMethod = (typeof PAYMENT_METHODS)[number];
+
 export const ART_TYPES = ['Дохід', 'Витрата', 'Інвестиції+', 'Інвестиції-', 'Позика+', 'Позика-', 'Позика', 'Дивіденди'] as const;
 export type ArtType = (typeof ART_TYPES)[number];
 
@@ -17,6 +21,7 @@ export const PNL_LINES = [
   ['tax', 'Податки і збори'],
   ['logistics', 'Логістика'],
   ['collab', 'Співпраці'],
+  ['claim', 'Рекламація'],
   ['credit', 'Кредити'],
   ['working', 'Оборотні кошти'],
   ['invPlus', 'Інвестиції +'],
@@ -28,8 +33,16 @@ export const PNL_LINES = [
 export type PnlLine = (typeof PNL_LINES)[number][0];
 export const lineLabel = (l: string) => PNL_LINES.find((x) => x[0] === l)?.[1] ?? '—';
 
-export const ACCOUNTS = ['Карта', 'Готівка'] as const;
+export const ACCOUNTS = ['Готівка', 'ТОВ', 'Карта', 'ФОП'] as const;
 export type Account = (typeof ACCOUNTS)[number];
+
+/** Спосіб оплати (клієнта, дизайнеру) → каса. */
+export const METHOD_ACCOUNT: Record<PaymentMethod, Account> = {
+  'готівка': 'Готівка',
+  'картка': 'Карта',
+  'рахунок ТОВ': 'ТОВ',
+  'рахунок ФОП': 'ФОП',
+};
 
 export interface ArticleRule {
   type: string;

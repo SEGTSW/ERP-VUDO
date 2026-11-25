@@ -1,5 +1,5 @@
 /** Статуси і переходи (ТЗ розділ 4). Спільні для сервера (перевірка) і інтерфейсу (кнопки, вікна). */
-import { CLAIM, CONTRACT_INDEX, REFUSAL, STATUSES, statusIndex, type PlanStage, type Status } from './constants.js';
+import { CLAIM, CONTRACT_INDEX, INSTALL_INDEX, REFUSAL, STATUSES, statusIndex, type PlanStage, type Status } from './constants.js';
 
 /** Кнопки «Перевести в»: наступний крок, Відмова (до договору), Рекламація (після монтажу). */
 export function nextStatuses(s: Status): Status[] {
@@ -9,15 +9,15 @@ export function nextStatuses(s: Status): Status[] {
   const r: Status[] = [];
   if (i < STATUSES.length) r.push(STATUSES[i]!);
   if (i < CONTRACT_INDEX) r.push(REFUSAL);
-  if (i >= 13) r.push(CLAIM);
+  if (i >= INSTALL_INDEX) r.push(CLAIM);
   return r;
 }
 
-/** Чи доступний статус у перемикачі (Відмова — лише до договору, Рекламація — лише з 13–14). */
+/** Чи доступний статус у перемикачі (Відмова — лише до договору, Рекламація — лише з 12–13). */
 export function switchAllowed(from: Status, to: Status): boolean {
   const i = statusIndex(from);
   if (to === REFUSAL) return from !== REFUSAL && i >= 1 && i < CONTRACT_INDEX;
-  if (to === CLAIM) return from === CLAIM || i >= 13;
+  if (to === CLAIM) return from === CLAIM || i >= INSTALL_INDEX;
   return true;
 }
 
@@ -32,7 +32,7 @@ export interface MoveField {
 export function moveFields(from: Status, to: Status): MoveField[] {
   if (from === CLAIM && to === 'Закрито') return [{ key: 'claimFix', label: 'Як виправлено (рішення)', kind: 'area' }];
   switch (to) {
-    case 'Замір призначено':
+    case 'Замір':
       return [
         { key: 'address', label: "Адреса об'єкта", kind: 'text' },
         { key: 'measureDate', label: 'Дата заміру', kind: 'date' },
@@ -56,23 +56,22 @@ export function moveFields(from: Status, to: Status): MoveField[] {
   }
 }
 
-/** Перехід у статус ставить відповідному етапу плану 100 %. */
-export const STATUS_COMPLETES: Partial<Record<Status, PlanStage>> = {
-  'Замір виконано': 'Замір',
-  'Очікує рішення клієнта': 'Прорахунок',
-  'Проєкт погоджено': 'Конструктив',
-  'Готово до відвантаження': 'Збірка',
-  'Змонтовано': 'Монтаж',
+/** Перехід у статус ставить відповідним етапам плану 100 %. */
+export const STATUS_COMPLETES: Partial<Record<Status, readonly PlanStage[]>> = {
+  'Очікує рішення клієнта': ['Прорахунок', 'Замір'],
+  'Проєкт погоджено': ['Конструктив'],
+  'Готово до відвантаження': ['Збірка'],
+  'Змонтовано': ['Монтаж'],
 };
 
 /** Етап уже пройдено за статусом (створюється виконаним) — за статусом, що його завершує (STATUS_COMPLETES). */
 export function stagePassed(s: Status, stage: PlanStage): boolean {
   if (s === CLAIM) return true;
-  const by = Object.entries(STATUS_COMPLETES).find(([, st]) => st === stage)?.[0] as Status | undefined;
+  const by = Object.entries(STATUS_COMPLETES).find(([, st]) => st.includes(stage))?.[0] as Status | undefined;
   return !!by && statusIndex(s) >= statusIndex(by);
 }
 
 /** Статус «після договору» (Договір і далі, або Рекламація). */
 export const afterContract = (s: Status) => s === CLAIM || statusIndex(s) >= CONTRACT_INDEX;
 /** Після монтажу (Змонтовано, Закрито, Рекламація). */
-export const afterInstall = (s: Status) => s === CLAIM || statusIndex(s) >= 13;
+export const afterInstall = (s: Status) => s === CLAIM || statusIndex(s) >= INSTALL_INDEX;

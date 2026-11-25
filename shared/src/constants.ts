@@ -3,8 +3,7 @@
 export const STATUSES = [
   'Звернення',
   'Прорахунок',
-  'Замір призначено',
-  'Замір виконано',
+  'Замір',
   'Очікує рішення клієнта',
   'Проєктування',
   'Проєкт погоджено',
@@ -23,28 +22,30 @@ export const CLAIM = 'Рекламація' as const;
 export type MainStatus = (typeof STATUSES)[number];
 export type Status = MainStatus | typeof REFUSAL | typeof CLAIM;
 
-/** Усі 16 статусів у порядку перемикача: 14 основних, Рекламація, Відмова. */
+/** Усі 15 статусів у порядку перемикача: 13 основних, Рекламація, Відмова. */
 export const ALL_STATUSES: readonly Status[] = [...STATUSES, CLAIM, REFUSAL];
 
 export type StatusGroup = 'sale' | 'work' | 'field' | 'done' | 'bad';
 
 /**
  * Порядок статусів погоджено із замовником (змінено відносно ТЗ v1.0):
- * до договору — 1–7 (прорахунок, замір, проєктування), договір — 8.
+ * до договору — 1–6 (прорахунок, замір, проєктування), договір — 7.
  */
-export const CONTRACT_INDEX = 8;
+export const CONTRACT_INDEX = 7;
+/** «Змонтовано» — з нього доступна Рекламація. */
+export const INSTALL_INDEX = 12;
 
-/** Група статусу: 1–7 продажі (до договору), 8–11 робота, 12–13 виїзд, 14 закрито, Відмова/Рекламація — проблема. */
+/** Група статусу: 1–6 продажі (до договору), 7–10 робота, 11–12 виїзд, 13 закрито, Відмова/Рекламація — проблема. */
 export function statusGroup(s: Status): StatusGroup {
   if (s === REFUSAL || s === CLAIM) return 'bad';
   const i = STATUSES.indexOf(s);
   if (i < CONTRACT_INDEX - 1) return 'sale';
-  if (i < 11) return 'work';
+  if (i < INSTALL_INDEX - 2) return 'work';
   if (s === 'Закрито') return 'done';
   return 'field';
 }
 
-/** Порядковий номер статусу 1–14 (0 — для Відмови/Рекламації). */
+/** Порядковий номер статусу 1–13 (0 — для Відмови/Рекламації). */
 export function statusIndex(s: Status): number {
   return STATUSES.indexOf(s as MainStatus) + 1;
 }
@@ -53,7 +54,7 @@ export const ITEM_TYPES = ['шафа-купе', 'розпашна шафа', 'к
 export const SOURCES = ['сайт', 'Instagram', 'рекомендація', 'повторний клієнт', 'дизайнер', 'інше'] as const;
 export const CLIENT_TYPES = ['фізособа', 'юрособа', 'дизайнер-партнер'] as const;
 export const PAYMENT_TYPES = ['аванс', 'доплата', 'інше', 'повернення'] as const;
-export const PAYMENT_METHODS = ['готівка', 'картка', 'рахунок'] as const;
+export const PAYMENT_METHODS = ['готівка', 'картка', 'рахунок ТОВ', 'рахунок ФОП'] as const;
 
 export const PLAN_STAGES = ['Прорахунок', 'Замір', 'Конструктив', 'Збірка', 'Монтаж'] as const;
 export type PlanStage = (typeof PLAN_STAGES)[number];
@@ -73,7 +74,7 @@ export type Components = Partial<Record<ComponentKey, number>>;
 /** Норма днів у статусі за замовчуванням (ТЗ, таблиця розділу 4). */
 export const DEFAULT_NORMS: Partial<Record<MainStatus, number>> = {
   'Звернення': 1,
-  'Замір призначено': 3,
+  'Замір': 3,
   'Прорахунок': 2,
   'Очікує рішення клієнта': 7,
   'Проєктування': 3,

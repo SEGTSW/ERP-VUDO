@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ACCOUNTS, ART_TYPES, findArticle, kyivToday, lineLabel, typeSign } from '@vudo/shared';
+import { ACCOUNTS, ART_TYPES, findArticle, kyivToday, lineLabel, typeSign, type Account } from '@vudo/shared';
 import { api, errorText } from '../api';
 import type { OrderListItem } from '../types';
 import { Modal, WarnBox } from '../ui/common';
@@ -28,7 +28,7 @@ export interface CashRow {
   orderId: number | null;
   counterparty: string;
   note: string;
-  account: 'Карта' | 'Готівка';
+  account: Account;
   sum: number;
   line: string;
   derived: null | 'оплата' | 'дизайнер';
@@ -71,7 +71,7 @@ export function CashModal({ edit, lockOrderId, prefill, onClose }: { edit?: Cash
     orderId: edit?.orderId ?? lockOrderId ?? null,
     counterparty: edit?.counterparty ?? prefill?.counterparty ?? '',
     note: edit?.note ?? prefill?.note ?? '',
-    account: edit?.account ?? 'Карта',
+    account: edit?.account ?? ('Карта' as Account),
     amount: edit ? String(Math.abs(edit.sum)) : prefill ? String(prefill.amount) : '',
   });
   const [err, setErr] = useState('');
@@ -174,7 +174,7 @@ export function CashModal({ edit, lockOrderId, prefill, onClose }: { edit?: Cash
         </label>
         <label className="f">
           Каса
-          <select value={v.account} onChange={(e) => setV({ ...v, account: e.target.value as 'Карта' | 'Готівка' })}>
+          <select value={v.account} onChange={(e) => setV({ ...v, account: e.target.value as Account })}>
             {ACCOUNTS.map((a) => (
               <option key={a}>{a}</option>
             ))}

@@ -1,6 +1,6 @@
 import { useDeferredValue, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { ART_TYPES, PNL_LINES, fmtDate, isOwner, lineLabel, money } from '@vudo/shared';
+import { ACCOUNTS, ART_TYPES, PNL_LINES, fmtDate, isOwner, lineLabel, money, type Account } from '@vudo/shared';
 import { api, errorText } from '../api';
 import { useMe } from '../session';
 import { useDrawer } from '../orders/hooks';
@@ -12,14 +12,14 @@ import { PnlTab } from '../finance/PnlTab';
 import { ImportButton } from '../finance/ImportButton';
 import { LoansTab, PayablesTab } from '../finance/RegistersTabs';
 import { FixedTab } from '../finance/FixedTab';
-import { DebtsTab, DesignersTab, PaymentsTab, SalariesTab } from '../finance/MoneyTabs';
+import { DebtsTab, DesignersTab, SalariesTab } from '../finance/MoneyTabs';
 
-type Tab = 'cash' | 'pnl' | 'pay' | 'debt' | 'des' | 'sal' | 'fixed' | 'loans' | 'bills' | 'arts';
+type Tab = 'cash' | 'pnl' | 'debt' | 'des' | 'sal' | 'fixed' | 'loans' | 'bills' | 'registry' | 'arts';
 const MONTHS = ['Січень', 'Лютий', 'Березень', 'Квітень', 'Травень', 'Червень', 'Липень', 'Серпень', 'Вересень', 'Жовтень', 'Листопад', 'Грудень'];
 const monthName = (m: string) => `${MONTHS[Number(m.slice(5, 7)) - 1]} ${m.slice(0, 4)}`;
 const plain = (n: number) => money(n).replace(/\s?грн$/, '');
 
-/** 10. Фінанси (власник — усі вкладки) / Оплати (менеджер — оплати й борги). */
+/** 10. Фінанси (власник — усі вкладки) / Оплати (менеджер — борги). */
 export function Finance() {
   const { user } = useMe();
   const owner = isOwner(user);
@@ -27,24 +27,23 @@ export function Finance() {
     ? [
         ['cash', 'Облік'],
         ['pnl', 'P&L'],
-        ['pay', 'Оплати клієнтів'],
         ['debt', 'Борги клієнтів'],
         ['des', 'Дизайнерам'],
-        ['sal', 'Нарахування'],
+        ['sal', 'Нарахування ЗП'],
         ['fixed', 'Постійні витрати'],
         ['bills', 'Рахунки до оплати'],
+        ['registry', 'Реєстр платежів'],
         ['loans', 'Позики'],
         ['arts', 'Статейник'],
       ]
     : [
-        ['pay', 'Оплати клієнтів'],
         ['debt', 'Борги клієнтів'],
       ];
   const [tab, setTab] = useState<Tab>(tabs[0]![0]);
   return (
     <>
       <div className="bar">
-        <h1 className="grow">{owner ? 'Фінанси' : 'Оплати'}</h1>
+        <h1 className="grow">{owner ? 'Фінанси' : 'Борги'}</h1>
         <XlButton section="finance" />
       </div>
       <div style={{ marginBottom: 14 }}>
@@ -53,13 +52,13 @@ export function Finance() {
       {tab === 'cash' && <CashTab />}
       {tab === 'arts' && <ArtsTab />}
       {tab === 'pnl' && <PnlTab />}
-      {tab === 'pay' && <PaymentsTab />}
       {tab === 'debt' && <DebtsTab />}
       {tab === 'des' && <DesignersTab />}
       {tab === 'sal' && <SalariesTab />}
       {tab === 'fixed' && <FixedTab />}
       {tab === 'loans' && <LoansTab />}
-      {tab === 'bills' && <PayablesTab />}
+      {tab === 'bills' && <PayablesTab key="bill" kind="bill" />}
+      {tab === 'registry' && <PayablesTab key="registry" kind="registry" />}
     </>
   );
 }
@@ -71,7 +70,7 @@ interface CashData {
   total: number;
   inflow: number;
   outflow: number;
-  balances: { card: number; cash: number; total: number };
+  balances: { by: Record<Account, number>; total: number };
   months: string[];
   today: string;
 }
@@ -119,16 +118,8 @@ function CashTab() {
         </div>
       </div>
       <div className="sums" style={{ marginBottom: 14 }}>
-        <div>
-          <small>Залишок на карті</small>
-          <b className={(b?.card ?? 0) < 0 ? 'debt' : ''}>{money(b?.card ?? 0)}</b>
-        </div>
-        <div>
-          <small>Залишок готівка</small>
-          <b className={(b?.cash ?? 0) < 0 ? 'debt' : ''}>{money(b?.cash ?? 0)}</b>
-        </div>
         <div style={{ background: 'var(--accent-soft)' }}>
-          <small>Загальний залишок</small>
+          <small>Залишок загальний</small>
           <b style={{ fontWeight: 600 }} className={(b?.total ?? 0) < 0 ? 'debt' : ''}>
             {money(b?.total ?? 0)}
           </b>
@@ -136,6 +127,19 @@ function CashTab() {
             станом на {fmtDate(data?.today)}
           </span>
         </div>
+        {(
+          [
+            ['ТОВ', 'Залишок по ТОВ'],
+            ['Карта', 'Залишок по карті'],
+            ['Готівка', 'Залишок по готівці'],
+            ['ФОП', 'Залишок по ФОП'],
+          ] as [Account, string][]
+        ).map(([a, label]) => (
+          <div key={a}>
+            <small>{label}</small>
+            <b className={(b?.by[a] ?? 0) < 0 ? 'debt' : ''}>{money(b?.by[a] ?? 0)}</b>
+          </div>
+        ))}
       </div>
       <div className="bar">
         <select value={month ?? cur} onChange={(e) => setMonth(e.target.value)} aria-label="Місяць">
@@ -175,8 +179,11 @@ function CashTab() {
               <th>Контрагент</th>
               <th>Примітка</th>
               <th>P&L</th>
-              <th className="r">Карта, грн</th>
-              <th className="r">Готівка, грн</th>
+              {ACCOUNTS.map((a) => (
+                <th key={a} className="r">
+                  {a}, грн
+                </th>
+              ))}
               <th />
             </tr>
           </thead>
@@ -203,8 +210,11 @@ function CashTab() {
                 <td>
                   <small className="muted">{lineLabel(e.line)}</small>
                 </td>
-                <td className={`r num ${e.sum < 0 ? 'debt' : ''}`}>{e.account === 'Карта' ? plain(e.sum) : ''}</td>
-                <td className={`r num ${e.sum < 0 ? 'debt' : ''}`}>{e.account === 'Готівка' ? plain(e.sum) : ''}</td>
+                {ACCOUNTS.map((a) => (
+                  <td key={a} className={`r num ${e.sum < 0 ? 'debt' : ''}`}>
+                    {e.account === a ? plain(e.sum) : ''}
+                  </td>
+                ))}
                 <td style={{ whiteSpace: 'nowrap' }}>
                   {!e.derived && (
                     <>

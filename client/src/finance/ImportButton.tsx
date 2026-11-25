@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { money } from '@vudo/shared';
+import { ACCOUNTS, money, type Account } from '@vudo/shared';
 import { api, errorText } from '../api';
 import { Modal } from '../ui/common';
 import { useToast } from '../ui/toast';
@@ -11,8 +11,7 @@ interface CashReport {
   duplicates: number;
   articlesAdded: number;
   skipped: { row: number; reason: string }[];
-  card: number;
-  cash: number;
+  byAccount: Record<Account, number>;
 }
 
 /** Кнопка імпорту з Excel (.xlsx) і звіт про результат. kind: облік або план P&L. */
@@ -64,7 +63,7 @@ export function ImportButton({ kind }: { kind: 'cash' | 'pnl' }) {
             </div>
           </div>
           <div className="note num">
-            У файлі: карта {money(report.card)}, готівка {money(report.cash)}.
+            У файлі: {ACCOUNTS.map((a) => `${a} ${money(report.byAccount[a])}`).join(', ')}.
             {report.articlesAdded ? ` До статейника додано нових підстатей: ${report.articlesAdded} — перевірте для них рядок P&L.` : ''}
           </div>
           {!!report.skipped.length && (

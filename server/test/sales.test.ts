@@ -142,31 +142,31 @@ function mainOf(card: Record<string, unknown> & { client: { id: number } }) {
 describe('статуси (розділ 4)', () => {
   async function toPricing(m: S, managerId: number, measurerId: number) {
     const o = await newOrder(m, managerId);
-    // Новий порядок: Звернення → Прорахунок → Замір призначено → Замір виконано → Очікує рішення → Проєктування → Проєкт погоджено → Договір
-    let r = await m.post(`/api/orders/${o.id}/status`, { to: 'Замір призначено', mode: 'step', values: {} });
+    // Новий порядок: Звернення → Прорахунок → Замір → Очікує рішення → Проєктування → Проєкт погоджено → Договір
+    let r = await m.post(`/api/orders/${o.id}/status`, { to: 'Замір', mode: 'step', values: {} });
     expect(r.body.error).toMatch(/можна перейти лише в: «Прорахунок»/);
     r = await m.post(`/api/orders/${o.id}/status`, { to: 'Прорахунок', mode: 'step' });
     expect(r.body.status).toBe('Прорахунок');
-    r = await m.post(`/api/orders/${o.id}/status`, { to: 'Замір призначено', mode: 'step', values: {} });
+    r = await m.post(`/api/orders/${o.id}/status`, { to: 'Замір', mode: 'step', values: {} });
     expect(r.body.error).toBe("Заповніть поле «Адреса об'єкта».");
     r = await m.post(`/api/orders/${o.id}/status`, {
-      to: 'Замір призначено', mode: 'step', values: { address: 'Київ, Хрещатик 1', measureDate: '2026-11-12', measurerId },
+      to: 'Замір', mode: 'step', values: { address: 'Київ, Хрещатик 1', measureDate: '2026-11-12', measurerId },
     });
-    expect(r.body.status).toBe('Замір призначено');
+    expect(r.body.status).toBe('Замір');
     expect(r.body.address).toBe('Київ, Хрещатик 1');
-    r = await m.post(`/api/orders/${o.id}/status`, { to: 'Замір виконано', mode: 'step' });
+    r = await m.post(`/api/orders/${o.id}/status`, { to: 'Очікує рішення клієнта', mode: 'step' });
     expect(r.body.error).toMatch(/Додайте хоча б один виріб/);
     await m.post(`/api/orders/${o.id}/items`, { name: 'Шафа', type: 'інше', description: '', pre: pre(10000), designerPct: null });
-    r = await m.post(`/api/orders/${o.id}/status`, { to: 'Замір виконано', mode: 'step' });
-    expect(r.body.status).toBe('Замір виконано');
-    expect(r.body.tasks.find((t: { stage: string }) => t.stage === 'Замір').progress).toBe(100);
+    r = await m.get(`/api/orders/${o.id}`);
+    expect(r.body.tasks.find((t: { stage: string }) => t.stage === 'Замір').progress).toBe(0);
     return o;
   }
 
   it('крок вперед з умовами; договір вимагає аванс ≥ 30 % і фіксує дату та ціну', async () => {
     const { ids, m } = await team();
     const o = await toPricing(m, ids.iryna, ids.taras);
-    await m.post(`/api/orders/${o.id}/status`, { to: 'Очікує рішення клієнта', mode: 'step' });
+    const wait = await m.post(`/api/orders/${o.id}/status`, { to: 'Очікує рішення клієнта', mode: 'step' });
+    expect(wait.body.tasks.filter((t: { progress: number }) => t.progress === 100).map((t: { stage: string }) => t.stage)).toEqual(['Прорахунок', 'Замір']);
     await m.post(`/api/orders/${o.id}/status`, { to: 'Проєктування', mode: 'step' });
     const pp = await m.post(`/api/orders/${o.id}/status`, { to: 'Проєкт погоджено', mode: 'step', values: { ok: true } });
     expect(pp.body).toMatchObject({ status: 'Проєкт погоджено', contractDate: null });
@@ -198,8 +198,8 @@ describe('статуси (розділ 4)', () => {
     expect(r.body.contractDate).toBe(kyivToday());
     const done = r.body.tasks.filter((t: { progress: number }) => t.progress === 100).map((t: { stage: string }) => t.stage);
     expect(done).toEqual(['Прорахунок', 'Замір', 'Конструктив']);
-    expect((await logTexts()).find((t) => t.startsWith('Статус «Замір виконано»'))).toBe(
-      'Статус «Замір виконано» → «Закупівля матеріалів» (пропущено етапів: 4)',
+    expect((await logTexts()).find((t) => t.startsWith('Статус «Замір»'))).toBe(
+      'Статус «Замір» → «Закупівля матеріалів» (пропущено етапів: 4)',
     );
     // назад — без умов, дата договору лишається
     r = await m.post(`/api/orders/${o.id}/status`, { to: 'Прорахунок', mode: 'jump' });
@@ -220,8 +220,8 @@ describe('статуси (розділ 4)', () => {
     expect(r.body.error).toMatch(/борг клієнта 10.000 грн/);
     const logs = (await logTexts()).map((t) => t.replace(/\s/g, ' '));
     expect(logs).toContain('Сповіщення менеджеру: змонтовано, борг 10 000 грн');
-    expect(logs).toContain('Статус «Замір виконано» → «Змонтовано» (пропущено етапів: 8)');
-    const folder = await pool.query(`SELECT folder FROM audit_log WHERE text LIKE 'Статус «Замір виконано» → «Змонтовано»%'`);
+    expect(logs).toContain('Статус «Замір» → «Змонтовано» (пропущено етапів: 8)');
+    const folder = await pool.query(`SELECT folder FROM audit_log WHERE text LIKE 'Статус «Замір» → «Змонтовано»%'`);
     expect(folder.rows[0].folder).toBe('mont');
 
     const o2 = await newOrder(m, ids.iryna, '+380501234567', 'Інший');
@@ -244,7 +244,7 @@ describe('оплати', () => {
     const { ids, m } = await team();
     const o = await newOrder(m, ids.iryna);
     await m.post(`/api/orders/${o.id}/items`, { name: 'Шафа', type: 'інше', description: '', pre: pre(400000), designerPct: null });
-    await m.post(`/api/orders/${o.id}/payments`, { sum: 200000, type: 'аванс', method: 'рахунок', date: kyivToday() });
+    await m.post(`/api/orders/${o.id}/payments`, { sum: 200000, type: 'аванс', method: 'рахунок ТОВ', date: kyivToday() });
     const r = await m.post(`/api/orders/${o.id}/payments`, { sum: 20000, type: 'повернення', method: 'картка', date: kyivToday() });
     expect(r.body.card.sums).toMatchObject({ paid: 180000, debt: 600000 - 180000, avans: 200000 });
     expect(r.body.message).toMatch(/^Внесено 20.000 грн. Оплачено 180.000 грн, борг 420.000 грн$/);

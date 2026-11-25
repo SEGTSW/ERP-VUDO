@@ -1,10 +1,10 @@
 import { Fragment, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { fmtDate, kyivToday, money } from '@vudo/shared';
+import { ACCOUNTS, fmtDate, kyivToday, money } from '@vudo/shared';
 import { api, errorText } from '../api';
 import { useDrawer } from '../orders/hooks';
 import { ConfirmButton, Modal, WarnBox } from '../ui/common';
-import { RowLink } from '../ui/bits';
+import { RowLink, XlButton } from '../ui/bits';
 import { useToast } from '../ui/toast';
 import { useArticles } from './CashModal';
 import type { OrderListItem } from '../types';
@@ -56,6 +56,7 @@ export function LoansTab() {
   const q = useQuery({ queryKey: ['finance', 'loans'], queryFn: () => api.get<{ rows: Loan[]; debt: number; overdue: number; nextDue: string | null }>('/finance/loans') });
   const [open, setOpen] = useState<number | null>(null);
   const [edit, setEdit] = useState<Loan | 'new' | null>(null);
+  const [editOp, setEditOp] = useState<LoanOp | null>(null);
   const [op, setOp] = useState<{ loan: Loan; kind: 'in' | 'out' } | null>(null);
   const toast = useToast();
   const refresh = useRefresh();
@@ -108,6 +109,7 @@ export function LoansTab() {
                   <td>
                     <div>{l.lender}</div>
                     {l.taxId && <small className="muted num">РНОКПП {l.taxId}</small>}
+                    {l.note && <small className="muted" style={{ display: 'block' }}>{l.note}</small>}
                   </td>
                   <td>
                     {l.contract ?? '—'}
@@ -146,9 +148,10 @@ export function LoansTab() {
                           {l.ops.map((o) => (
                             <div className="li" key={o.id}>
                               <div className="m">
-                                {fmtDate(o.date)} · {o.kind === 'in' ? 'Надходження' : 'Повернення'} · {o.method}
+                                {fmtDate(o.date)} · {o.kind === 'in' ? 'Надходження' : 'Повернення'} · спосіб: {o.method}
+                                {o.note && <div>Примітка: {o.note}</div>}
                                 <small>
-                                  {[o.doc, o.note, o.byName].filter(Boolean).join(' · ')}
+                                  {[o.doc, o.byName].filter(Boolean).join(' · ')}
                                   {o.kind === 'in' && o.dueDate ? ` · повернути до ${fmtDate(o.dueDate)}` : ''}
                                   {o.cashOpId ? ' · в обліку' : ' · не в обліку'}
                                 </small>
@@ -164,6 +167,9 @@ export function LoansTab() {
                                   {o.kind === 'out' ? '−' : '+'}
                                   {money(o.sum)}
                                 </b>
+                                <button type="button" className="mini" title="Примітка і спосіб" aria-label="Примітка і спосіб" onClick={() => setEditOp(o)}>
+                                  ✎
+                                </button>
                                 <ConfirmButton className="mini" onConfirm={() => del.mutate(o.id)}>
                                   ✕
                                 </ConfirmButton>
@@ -189,6 +195,7 @@ export function LoansTab() {
         одразу записати в облік (Позика+ / Позика-) — зніміть галочку, якщо рух уже є в обліку.
       </div>
       {edit && <LoanModal loan={edit === 'new' ? null : edit} onClose={() => setEdit(null)} />}
+      {editOp && <LoanOpEditModal op={editOp} onClose={() => setEditOp(null)} />}
       {op && <LoanOpModal loan={op.loan} kind={op.kind} onClose={() => setOp(null)} />}
     </>
   );
@@ -275,7 +282,7 @@ function LoanOpModal({ loan, kind, onClose }: { loan: Loan; kind: 'in' | 'out'; 
   const [v, setV] = useState({
     date: kyivToday(),
     sum: kind === 'out' ? String(loan.debt) : '',
-    method: 'безготівково',
+    method: 'ТОВ',
     doc: '',
     note: '',
     dueDate: '',
@@ -303,10 +310,11 @@ function LoanOpModal({ loan, kind, onClose }: { loan: Loan; kind: 'in' | 'out'; 
           <input inputMode="decimal" value={v.sum} onChange={(e) => setV({ ...v, sum: e.target.value })} />
         </label>
         <label className="f">
-          Спосіб
+          {kind === 'in' ? 'Спосіб внесення' : 'Спосіб повернення'}
           <select value={v.method} onChange={(e) => setV({ ...v, method: e.target.value })}>
-            <option>безготівково</option>
-            <option>готівка</option>
+            {ACCOUNTS.map((a) => (
+              <option key={a}>{a}</option>
+            ))}
           </select>
         </label>
         {kind === 'in' && (
@@ -340,7 +348,51 @@ function LoanOpModal({ loan, kind, onClose }: { loan: Loan; kind: 'in' | 'out'; 
   );
 }
 
-/* ======================= Рахунки до оплати ======================= */
+function LoanOpEditModal({ op, onClose }: { op: LoanOp; onClose: () => void }) {
+  const toast = useToast();
+  const refresh = useRefresh();
+  const [v, setV] = useState({ method: op.method, note: op.note ?? '' });
+  const [err, setErr] = useState('');
+  const known = (ACCOUNTS as readonly string[]).includes(v.method);
+  const save = useMutation({
+    mutationFn: () => api.patch(`/finance/loan-ops/${op.id}`, { note: v.note, ...(known ? { method: v.method } : {}) }),
+    onSuccess: () => (refresh(), toast('Збережено'), onClose()),
+    onError: (e) => setErr(errorText(e)),
+  });
+  return (
+    <Modal onClose={onClose} onSubmit={() => save.mutate()} labelledBy="loe-title">
+      <h2 id="loe-title">
+        Операція від {fmtDate(op.date)} · {money(op.sum)}
+      </h2>
+      <label className="f">
+        {op.kind === 'in' ? 'Спосіб внесення' : 'Спосіб повернення'}
+        <select value={v.method} onChange={(e) => setV({ ...v, method: e.target.value })}>
+          {!known && <option>{v.method}</option>}
+          {ACCOUNTS.map((a) => (
+            <option key={a}>{a}</option>
+          ))}
+        </select>
+      </label>
+      <label className="f">
+        Примітка
+        <input value={v.note} onChange={(e) => setV({ ...v, note: e.target.value })} />
+      </label>
+      <WarnBox>{err}</WarnBox>
+      <div className="act">
+        <button type="button" className="btn" onClick={onClose}>
+          Скасувати
+        </button>
+        <button type="submit" className="btn pri" disabled={save.isPending}>
+          Зберегти
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+/* ======================= Рахунки до оплати і реєстр платежів ======================= */
+
+type PayableKind = 'bill' | 'registry';
 
 interface Payable {
   id: number;
@@ -349,6 +401,8 @@ interface Payable {
   iban: string | null;
   purpose: string;
   invoice: string | null;
+  invoiceDate: string | null;
+  no: number;
   amount: number;
   vat: number;
   dueDate: string | null;
@@ -368,10 +422,12 @@ interface Payable {
 
 const STATUS_CLS: Record<string, string> = { 'Прострочено': 'g-bad', 'Частково': 'g-work', 'До сплати': 'g-sale', 'Сплачено': 'g-done', 'Скасовано': '' };
 
-export function PayablesTab() {
+/** bill — рахунки, які ще треба оплатити (для власника); registry — реєстр платежів, який передають бухгалтеру. */
+export function PayablesTab({ kind }: { kind: PayableKind }) {
+  const reg = kind === 'registry';
   const { openOrder } = useDrawer();
   const toast = useToast();
-  const q = useQuery({ queryKey: ['finance', 'payables'], queryFn: () => api.get<{ rows: Payable[]; toPay: number; overdue: number; week: number }>('/finance/payables') });
+  const q = useQuery({ queryKey: ['finance', 'payables', kind], queryFn: () => api.get<{ rows: Payable[]; toPay: number; overdue: number; week: number }>(`/finance/payables?kind=${kind}`) });
   const [showPaid, setShowPaid] = useState(false);
   const [open, setOpen] = useState<number | null>(null);
   const [edit, setEdit] = useState<Payable | 'new' | null>(null);
@@ -399,21 +455,25 @@ export function PayablesTab() {
           <input type="checkbox" checked={showPaid} onChange={(e) => setShowPaid(e.target.checked)} /> Показувати сплачені й скасовані
         </label>
         <span className="grow" />
+        {reg && <XlButton section="registry" params={{ all: showPaid ? 1 : null }} />}
         <button type="button" className="btn pri" onClick={() => setEdit('new')}>
-          + Рахунок
+          {reg ? '+ Платіж' : '+ Рахунок'}
         </button>
       </div>
       <div className="tbl-wrap">
         <table>
           <thead>
             <tr>
+              {reg && <th>№</th>}
               <th>Оплатити до</th>
               <th>Контрагент</th>
               <th>За що</th>
               <th>Рахунок</th>
+              {reg && <th>Реквізити</th>}
+              {reg && <th>Призначення платежу</th>}
               <th className="r">Сума</th>
-              <th className="r">Залишок</th>
-              <th>Пріоритет</th>
+              <th className="r">Залишок до сплати</th>
+              {!reg && <th>Пріоритет</th>}
               <th>Статус</th>
               <th />
             </tr>
@@ -422,6 +482,7 @@ export function PayablesTab() {
             {rows.map((p) => (
               <Fragment key={p.id}>
                 <RowLink className={p.cancelled ? 'muted' : undefined} onOpen={() => setOpen(open === p.id ? null : p.id)}>
+                  {reg && <td className="num">{p.no}</td>}
                   <td className="num">{fmtDate(p.dueDate)}</td>
                   <td>
                     <div>{p.counterparty}</div>
@@ -435,15 +496,24 @@ export function PayablesTab() {
                       </small>
                     )}
                   </td>
-                  <td>{p.invoice}</td>
+                  <td>
+                    {p.invoice}
+                    {p.invoiceDate && <small className="muted num" style={{ display: 'block' }}>від {fmtDate(p.invoiceDate)}</small>}
+                  </td>
+                  {reg && (
+                    <td className="num" style={{ fontSize: 11.5, wordBreak: 'break-all', minWidth: 110 }}>
+                      {p.iban ?? '—'}
+                    </td>
+                  )}
+                  {reg && <td className="nt">{p.purposeText}</td>}
                   <td className="r num">
                     {money(p.amount)}
                     {p.vat > 0 && <small className="muted" style={{ display: 'block' }}>ПДВ {money(p.vat)}</small>}
                   </td>
-                  <td className="r num">
+                  <td className="r num" style={reg && p.left > 0 && !p.cancelled ? { background: 'var(--accent-soft)' } : undefined}>
                     <b>{money(p.left)}</b>
                   </td>
-                  <td>{p.priority}</td>
+                  {!reg && <td>{p.priority}</td>}
                   <td>
                     <span className={`pill ${STATUS_CLS[p.status] ?? ''}`}>{p.status}</span>
                   </td>
@@ -457,7 +527,7 @@ export function PayablesTab() {
                 </RowLink>
                 {open === p.id && (
                   <tr className="sub">
-                    <td colSpan={9}>
+                    <td colSpan={reg ? 11 : 9}>
                       <div className="desdet">
                         <div>
                           <h3>Реквізити</h3>
@@ -524,19 +594,22 @@ export function PayablesTab() {
           </tbody>
         </table>
         {q.isPending && <div className="empty">Завантаження…</div>}
-        {d && !rows.length && <div className="empty">Немає рахунків до оплати.</div>}
+        {d && !rows.length && <div className="empty">{reg ? 'У реєстрі немає несплачених платежів.' : 'Немає рахунків до оплати.'}</div>}
       </div>
       <div className="note" style={{ marginTop: 12 }}>
+        {reg
+          ? 'Реєстр для бухгалтера: заповніть і натисніть «Excel», щоб передати на оплату. Оплата тут за замовчуванням не пишеться в облік — поставте галочку, якщо її там ще немає. '
+          : ''}
         Залишок і статус рахуються самі. «Оплатити» (можна частинами) записує витрату в облік зі статтею рахунку; якщо вказано замовлення — у його
         фактичні витрати.
       </div>
-      {edit && <PayableModal item={edit === 'new' ? null : edit} onClose={() => setEdit(null)} />}
-      {pay && <PayModal p={pay} onClose={() => setPay(null)} />}
+      {edit && <PayableModal kind={kind} item={edit === 'new' ? null : edit} onClose={() => setEdit(null)} />}
+      {pay && <PayModal kind={kind} p={pay} onClose={() => setPay(null)} />}
     </>
   );
 }
 
-function PayableModal({ item, onClose }: { item: Payable | null; onClose: () => void }) {
+function PayableModal({ kind, item, onClose }: { kind: PayableKind; item: Payable | null; onClose: () => void }) {
   const toast = useToast();
   const refresh = useRefresh();
   const arts = (useArticles().data ?? []).filter((a) => !a.hidden && a.type === 'Витрата');
@@ -547,6 +620,7 @@ function PayableModal({ item, onClose }: { item: Payable | null; onClose: () => 
     iban: item?.iban ?? '',
     purpose: item?.purpose ?? '',
     invoice: item?.invoice ?? '',
+    invoiceDate: item?.invoiceDate ?? '',
     amount: item ? String(item.amount) : '',
     vat: item?.vat ? String(item.vat) : '',
     dueDate: item?.dueDate ?? '',
@@ -563,11 +637,12 @@ function PayableModal({ item, onClose }: { item: Payable | null; onClose: () => 
     amount: toNum(v.amount),
     vat: v.vat.trim() ? toNum(v.vat) : 0,
     dueDate: v.dueDate || null,
+    invoiceDate: v.invoiceDate || null,
     orderId: v.orderId ? Number(v.orderId) : null,
     cat: v.orderId && !v.cat ? 'Замовлення' : v.cat,
   });
   const save = useMutation({
-    mutationFn: () => (item ? api.patch(`/finance/payables/${item.id}`, body()) : api.post('/finance/payables', body())),
+    mutationFn: () => (item ? api.patch(`/finance/payables/${item.id}`, body()) : api.post('/finance/payables', { ...body(), kind })),
     onSuccess: () => (refresh(), toast('Збережено'), onClose()),
     onError: (e) => setErr(errorText(e)),
   });
@@ -582,7 +657,7 @@ function PayableModal({ item, onClose }: { item: Payable | null; onClose: () => 
       onSubmit={() => (!v.counterparty.trim() ? setErr('Вкажіть контрагента.') : !(toNum(v.amount) > 0) ? setErr('Вкажіть суму більше 0.') : save.mutate())}
       labelledBy="pay-title"
     >
-      <h2 id="pay-title">{item ? 'Рахунок до оплати' : 'Новий рахунок до оплати'}</h2>
+      <h2 id="pay-title">{kind === 'registry' ? (item ? 'Платіж у реєстрі' : 'Новий платіж у реєстр') : item ? 'Рахунок до оплати' : 'Новий рахунок до оплати'}</h2>
       <div className="grid">
         <label className="f">
           Контрагент *
@@ -601,8 +676,12 @@ function PayableModal({ item, onClose }: { item: Payable | null; onClose: () => 
           <input value={v.purpose} placeholder="за ДСП, фурнітуру…" onChange={(e) => setV({ ...v, purpose: e.target.value })} />
         </label>
         <label className="f">
-          Рахунок (№ і дата)
+          № рахунку
           <input value={v.invoice} onChange={(e) => setV({ ...v, invoice: e.target.value })} />
+        </label>
+        <label className="f">
+          Дата рахунку
+          <input type="date" value={v.invoiceDate} onChange={(e) => setV({ ...v, invoiceDate: e.target.value })} />
         </label>
         <label className="f">
           Сума, грн *
@@ -661,7 +740,7 @@ function PayableModal({ item, onClose }: { item: Payable | null; onClose: () => 
       <div className="act">
         {item && (
           <button type="button" className="btn warn" style={{ marginRight: 'auto' }} onClick={() => cancel.mutate()}>
-            {item.cancelled ? 'Відновити' : 'Скасувати рахунок'}
+            {item.cancelled ? 'Відновити' : kind === 'registry' ? 'Скасувати платіж' : 'Скасувати рахунок'}
           </button>
         )}
         <button type="button" className="btn" onClick={onClose}>
@@ -675,10 +754,10 @@ function PayableModal({ item, onClose }: { item: Payable | null; onClose: () => 
   );
 }
 
-function PayModal({ p, onClose }: { p: Payable; onClose: () => void }) {
+function PayModal({ kind, p, onClose }: { kind: PayableKind; p: Payable; onClose: () => void }) {
   const toast = useToast();
   const refresh = useRefresh();
-  const [v, setV] = useState({ date: kyivToday(), sum: String(p.left), account: 'Карта', toCash: true });
+  const [v, setV] = useState({ date: kyivToday(), sum: String(p.left), account: 'ТОВ', toCash: kind === 'bill' });
   const [err, setErr] = useState('');
   const save = useMutation({
     mutationFn: () => api.post(`/finance/payables/${p.id}/pay`, { ...v, sum: toNum(v.sum) }),
@@ -703,8 +782,9 @@ function PayModal({ p, onClose }: { p: Payable; onClose: () => void }) {
         <label className="f">
           Каса
           <select value={v.account} onChange={(e) => setV({ ...v, account: e.target.value })}>
-            <option>Карта</option>
-            <option>Готівка</option>
+            {ACCOUNTS.map((a) => (
+              <option key={a}>{a}</option>
+            ))}
           </select>
         </label>
       </div>

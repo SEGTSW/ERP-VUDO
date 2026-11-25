@@ -31,7 +31,7 @@ if (values.cash) {
     return x;
   });
   const sum = (a: string) => Math.round(p.rows.filter((x) => x.account === a).reduce((t, x) => t + x.sum, 0) * 100) / 100;
-  console.log(`Облік: рядків ${p.total}, додано ${r.added}, уже були ${r.duplicates}, нових підстатей ${r.articlesAdded}; карта ${sum('Карта')}, готівка ${sum('Готівка')}`);
+  console.log(`Облік: рядків ${p.total}, додано ${r.added}, уже були ${r.duplicates}, нових підстатей ${r.articlesAdded}; карта ${sum('Карта')}, готівка ${sum('Готівка')}, ТОВ ${sum('ТОВ')}, ФОП ${sum('ФОП')}`);
   for (const s of p.skipped) console.log(`  пропущено рядок ${s.row}: ${s.reason}`);
 }
 
