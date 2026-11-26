@@ -1,3 +1,4 @@
+import { kop } from './format.js';
 /** Фінанси: статті, рядки P&L, правило пошуку рядка (ТЗ 10.1, 10.2, 10.8). */
 
 import type { PAYMENT_METHODS } from './constants.js';
@@ -35,6 +36,13 @@ export const lineLabel = (l: string) => PNL_LINES.find((x) => x[0] === l)?.[1] ?
 
 export const ACCOUNTS = ['Готівка', 'ТОВ', 'Карта', 'ФОП'] as const;
 export type Account = (typeof ACCOUNTS)[number];
+
+/** Валютна каса: сума в доларах + курс; у P&L і гривневих підсумках — еквівалент за курсом внесення. */
+export const USD_ACCOUNT = 'USD' as const;
+export const CASH_ACCOUNTS = [...ACCOUNTS, USD_ACCOUNT] as const;
+export type CashAccount = (typeof CASH_ACCOUNTS)[number];
+/** 1 234,56 $ */
+export const usd = (n: number | null | undefined): string => `${kop(n)} $`;
 
 /** Спосіб оплати (клієнта, дизайнеру) → каса. */
 export const METHOD_ACCOUNT: Record<PaymentMethod, Account> = {

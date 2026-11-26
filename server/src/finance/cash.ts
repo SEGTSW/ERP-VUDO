@@ -2,7 +2,7 @@
  * Облік руху коштів (ТЗ 10.1): ручні операції + автоматичні рядки з оплат клієнтів
  * (і з виплат дизайнерам — з наступною частиною). Рядок P&L кожної операції — зі статейника.
  */
-import { ACCOUNTS, METHOD_ACCOUNT, lineFor, type Account, type ArticleRule, type PnlLine } from '@vudo/shared';
+import { ACCOUNTS, METHOD_ACCOUNT, USD_ACCOUNT, lineFor, type Account, type CashAccount, type ArticleRule, type PnlLine } from '@vudo/shared';
 import type { Db } from '../db.js';
 
 export interface Article extends ArticleRule {
@@ -30,8 +30,12 @@ export interface CashRow {
   orderId: number | null;
   counterparty: string;
   note: string;
-  account: Account;
+  account: CashAccount;
+  /** Гривні (для USD — еквівалент за курсом) */
   sum: number;
+  /** Каса USD: сума в доларах і курс */
+  usd: number | null;
+  rate: number | null;
   line: PnlLine;
   derived: null | 'оплата' | 'дизайнер';
   updatedAt: string | null;
@@ -49,7 +53,7 @@ export async function cashRows(db: Db, opts: { orderId?: number; from?: string; 
   const r = await db.query<Omit<CashRow, 'line'>>(
     `SELECT * FROM (
        SELECT 'c' || c.id AS key, c.id AS "opId", c.date, c.type, c.cat, c.obj, c.order_id AS "orderId", c.counterparty,
-              c.note, c.account, c.sum, NULL AS derived, c.updated_at AS "updatedAt", u.name AS "updatedByName", c.id AS ord
+              c.note, c.account, c.sum, c.usd, c.rate, NULL AS derived, c.updated_at AS "updatedAt", u.name AS "updatedByName", c.id AS ord
          FROM cash_ops c LEFT JOIN users u ON u.id = c.updated_by
        UNION ALL
        SELECT 'p' || p.id, NULL, p.date,
@@ -57,14 +61,14 @@ export async function cashRows(db: Db, opts: { orderId?: number; from?: string; 
               '№' || o.num || ' · ' || cl.name, o.id, 'Замовник',
               p.type || CASE WHEN coalesce(p.comment, '') <> '' THEN ' · ' || p.comment ELSE '' END,
               ${accountSql('p.method')},
-              CASE WHEN p.type = 'повернення' THEN -p.sum ELSE p.sum END,
+              CASE WHEN p.type = 'повернення' THEN -p.sum ELSE p.sum END, NULL, NULL,
               'оплата', NULL, NULL, p.id
          FROM payments p JOIN orders o ON o.id = p.order_id JOIN clients cl ON cl.id = o.client_id
        UNION ALL
        SELECT 'd' || d.id, NULL, d.date, 'Витрата', 'Співпраці', 'Виплата', NULL,
               dc.name || CASE WHEN coalesce(dc.company, '') <> '' THEN ' · ' || dc.company ELSE '' END,
               'бонус дизайнеру' || CASE WHEN coalesce(d.comment, '') <> '' THEN ' · ' || d.comment ELSE '' END,
-              ${accountSql('d.method')}, -d.sum, 'дизайнер', NULL, NULL, d.id
+              ${accountSql('d.method')}, -d.sum, NULL, NULL, 'дизайнер', NULL, NULL, d.id
          FROM designer_payouts d JOIN clients dc ON dc.id = d.designer_id
      ) x
      WHERE ($1::bigint IS NULL OR x."orderId" = $1) AND ($2::date IS NULL OR x.date >= $2) AND ($3::date IS NULL OR x.date <= $3)
@@ -74,11 +78,15 @@ export async function cashRows(db: Db, opts: { orderId?: number; from?: string; 
   return r.rows.map((x) => ({ ...x, line: lineFor(arts, x.type, x.cat, x.obj) }));
 }
 
-/** Залишки за весь час: по кожній касі й разом. */
+/** Залишки за весь час: по кожній гривневій касі й разом (без валюти); USD — окремо, у доларах і в гривневому еквіваленті. */
 export async function balances(db: Db) {
+  const u = await db.query<{ usd: number | null; uah: number | null }>(
+    `SELECT sum(usd)::numeric AS usd, sum(sum)::numeric AS uah FROM cash_ops WHERE account = $1`,
+    [USD_ACCOUNT],
+  );
   const r = await db.query<{ account: string; s: number }>(
     `SELECT account, sum(s)::numeric AS s FROM (
-       SELECT account, sum AS s FROM cash_ops
+       SELECT account, sum AS s FROM cash_ops WHERE account <> '${USD_ACCOUNT}'
        UNION ALL
        SELECT ${accountSql('method')},
               CASE WHEN type = 'повернення' THEN -sum ELSE sum END FROM payments
@@ -87,7 +95,11 @@ export async function balances(db: Db) {
      ) x GROUP BY account`,
   );
   const by = Object.fromEntries(ACCOUNTS.map((a) => [a, r.rows.find((x) => x.account === a)?.s ?? 0])) as Record<Account, number>;
-  return { by, total: Math.round(ACCOUNTS.reduce((t, a) => t + by[a], 0) * 100) / 100 };
+  return {
+    by,
+    total: Math.round(ACCOUNTS.reduce((t, a) => t + by[a], 0) * 100) / 100,
+    usd: { usd: u.rows[0]?.usd ?? 0, uah: u.rows[0]?.uah ?? 0 },
+  };
 }
 
 /**

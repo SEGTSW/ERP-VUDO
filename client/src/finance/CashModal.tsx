@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ACCOUNTS, ART_TYPES, findArticle, kyivToday, lineLabel, typeSign, type Account } from '@vudo/shared';
+import { ART_TYPES, CASH_ACCOUNTS, USD_ACCOUNT, findArticle, kyivToday, lineLabel, moneyKop, typeSign, type CashAccount } from '@vudo/shared';
 import { api, errorText } from '../api';
 import type { OrderListItem } from '../types';
 import { Modal, WarnBox } from '../ui/common';
@@ -28,8 +28,10 @@ export interface CashRow {
   orderId: number | null;
   counterparty: string;
   note: string;
-  account: Account;
+  account: CashAccount;
   sum: number;
+  usd: number | null;
+  rate: number | null;
   line: string;
   derived: null | 'оплата' | 'дизайнер';
   updatedAt: string | null;
@@ -71,9 +73,12 @@ export function CashModal({ edit, lockOrderId, prefill, onClose }: { edit?: Cash
     orderId: edit?.orderId ?? lockOrderId ?? null,
     counterparty: edit?.counterparty ?? prefill?.counterparty ?? '',
     note: edit?.note ?? prefill?.note ?? '',
-    account: edit?.account ?? ('Карта' as Account),
-    amount: edit ? String(Math.abs(edit.sum)) : prefill ? String(prefill.amount) : '',
+    account: edit?.account ?? ('Карта' as CashAccount),
+    amount: edit ? String(Math.abs(edit.usd ?? edit.sum)) : prefill ? String(prefill.amount) : '',
+    rate: edit?.rate ? String(edit.rate) : '',
   });
+  const toNum = (x: string) => Number(x.replace(',', '.').replace(/\s/g, ''));
+  const isUsd = v.account === USD_ACCOUNT;
   const [err, setErr] = useState('');
   const ofType = arts.filter((a) => a.type === v.type);
   const cats = [...new Set(ofType.map((a) => a.cat))];
@@ -92,7 +97,8 @@ export function CashModal({ edit, lockOrderId, prefill, onClose }: { edit?: Cash
         counterparty: v.counterparty,
         note: v.note,
         account: v.account,
-        amount: Number(v.amount.replace(',', '.').replace(/\s/g, '')),
+        amount: toNum(v.amount),
+        rate: isUsd ? toNum(v.rate) : null,
         ...(prefill && !edit ? { fixedId: prefill.fixedId } : {}),
       };
       return edit ? api.patch(`/finance/cash/${edit.opId}`, body) : api.post('/finance/cash', body);
@@ -110,6 +116,7 @@ export function CashModal({ edit, lockOrderId, prefill, onClose }: { edit?: Cash
       onSubmit={() => {
         if (!(Number(v.amount.replace(',', '.').replace(/\s/g, '')) > 0)) return setErr('Вкажіть суму більше 0.');
         if (toOrder && !v.orderId) return setErr('Виберіть замовлення.');
+        if (isUsd && !(toNum(v.rate) > 0)) return setErr('Вкажіть курс долара.');
         save.mutate();
       }}
       labelledBy="cash-title"
@@ -169,17 +176,26 @@ export function CashModal({ edit, lockOrderId, prefill, onClose }: { edit?: Cash
           <input value={v.counterparty} placeholder={art?.defaultCp || 'VUDO'} onChange={(e) => setV({ ...v, counterparty: e.target.value })} />
         </label>
         <label className="f">
-          Сума, грн *
+          {isUsd ? 'Сума, $ *' : 'Сума, грн *'}
           <input inputMode="decimal" value={v.amount} onChange={(e) => setV({ ...v, amount: e.target.value })} />
         </label>
         <label className="f">
           Каса
-          <select value={v.account} onChange={(e) => setV({ ...v, account: e.target.value as Account })}>
-            {ACCOUNTS.map((a) => (
-              <option key={a}>{a}</option>
+          <select value={v.account} onChange={(e) => setV({ ...v, account: e.target.value as CashAccount })}>
+            {CASH_ACCOUNTS.map((a) => (
+              <option key={a} value={a}>
+                {a === USD_ACCOUNT ? 'USD (долари)' : a}
+              </option>
             ))}
           </select>
         </label>
+        {isUsd && (
+          <label className="f">
+            Курс, грн за $1 *
+            <input inputMode="decimal" value={v.rate} placeholder="напр. 41,50" onChange={(e) => setV({ ...v, rate: e.target.value })} />
+            {toNum(v.amount) > 0 && toNum(v.rate) > 0 && <small className="muted">= {moneyKop(toNum(v.amount) * toNum(v.rate))} у P&L</small>}
+          </label>
+        )}
       </div>
       <label className="f">
         Примітка

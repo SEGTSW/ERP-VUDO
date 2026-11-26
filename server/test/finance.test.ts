@@ -41,7 +41,7 @@ describe('облік (10.1)', () => {
     expect(exp).toMatchObject({ sum: -4000, obj: `№${o.num} · Олена`, line: 'orderCost', account: 'Карта' });
     const pay = r.rows.find((x: { derived: string | null }) => x.derived === 'оплата');
     expect(pay).toMatchObject({ sum: 6000, type: 'Дохід', cat: 'Замовлення', account: 'Готівка', line: 'income', counterparty: 'Замовник' });
-    expect(r.balances).toEqual({ by: { 'Готівка': 6000, 'ТОВ': 0, 'Карта': -4000, 'ФОП': 0 }, total: 2000 });
+    expect(r.balances).toEqual({ by: { 'Готівка': 6000, 'ТОВ': 0, 'Карта': -4000, 'ФОП': 0 }, total: 2000, usd: { usd: 0, uah: 0 } });
     expect(r).toMatchObject({ inflow: 6000, outflow: -4000 });
     expect(norm((await logTexts()).at(-1)!)).toBe('Облік: Витрата/Замовлення -4 000 грн · ДСП'.replace('-', '−').replace('−', '-'));
   });
@@ -255,6 +255,30 @@ describe('аналітика (11)', () => {
   });
 });
 
+describe('валютна каса USD', () => {
+  it('операція в доларах з курсом, залишок окремо, обмін валюти, P&L у гривнях', async () => {
+    const { a } = await setup();
+    expect((await a.post('/api/finance/cash', { date: '2026-11-20', type: 'Витрата', cat: 'Маркетинг', obj: 'Фейсбук', account: 'USD', amount: 100 })).status).toBe(400); // без курсу
+    expect((await a.post('/api/finance/cash/exchange', { date: '2026-11-19', direction: 'buy', account: 'Готівка', usd: 1000, rate: 41.25 })).status).toBe(201);
+    expect((await a.post('/api/finance/cash', { date: '2026-11-20', type: 'Витрата', cat: 'Маркетинг', obj: 'Фейсбук', account: 'USD', amount: 100.5, rate: 42 })).status).toBe(201);
+    const cash = (await a.get('/api/finance/cash?month=')).body;
+    expect(cash.balances.usd).toEqual({ usd: 899.5, uah: 41250 - 4221 });
+    expect(cash.balances.by['Готівка']).toBe(6000 - 41250);
+    expect(cash.balances.total).toBe(6000 - 41250); // без долара
+    const fb = cash.rows.find((x: { cat: string; account: string }) => x.account === 'USD' && x.cat === 'Маркетинг');
+    expect(fb).toMatchObject({ usd: -100.5, rate: 42, sum: -4221, line: 'marketing' });
+    const ex = cash.rows.filter((x: { obj: string }) => x.obj === 'Обмін коштів');
+    expect(ex.map((x: { line: string }) => x.line)).toEqual(['none', 'none']);
+    // редагування: інша сума в доларах
+    expect((await a.patch(`/api/finance/cash/${fb.opId}`, { date: '2026-11-20', type: 'Витрата', cat: 'Маркетинг', obj: 'Фейсбук', account: 'USD', amount: 50, rate: 40 })).status).toBe(200);
+    const pnl = (await a.get('/api/finance/pnl?year=2026')).body;
+    expect(pnl.fact['2026-11'].marketing).toBe(-2000);
+    // продаж
+    expect((await a.post('/api/finance/cash/exchange', { date: '2026-11-21', direction: 'sell', account: 'Карта', usd: 950, rate: 41 })).status).toBe(201);
+    expect((await a.get('/api/finance/cash?month=')).body.balances.usd.usd).toBe(0);
+  });
+});
+
 describe('імпорт з Excel (10.1, 10.2)', () => {
   async function xlsx(build: (ws: import('exceljs').Worksheet) => void, name = 'Облік') {
     const ExcelJS = (await import('exceljs')).default;
@@ -290,6 +314,25 @@ describe('імпорт з Excel (10.1, 10.2)', () => {
     expect(again.body).toMatchObject({ added: 0, duplicates: 6 });
     const m = await loginAs('iryna');
     expect((await m.agent.post('/api/finance/cash/import').set('X-VUDO', '1').attach('file', buf, 'облік.xlsx')).status).toBe(403);
+  });
+
+  it('облік: колонка USD імпортується лише з курсом', async () => {
+    const { a } = await setup();
+    const buf = await xlsx((ws) => {
+      ws.addRow(['Дата', 'Стаття', 'Підстаття', 'Обєкт', 'Контрагент ', 'Примітка', 'USD', 'UAH', 'UAH(готівка)', 'ТОВ ВУДО']);
+      ws.addRow([new Date(Date.UTC(2026, 10, 20)), 'Позика+', 'Поповнення', 'VUDO', 'Єфімов', 'Позика 800$', 800]);
+      ws.addRow([new Date(Date.UTC(2026, 10, 20)), 'Витрата', 'Фонд оплати праці', 'Заробітня плата', 'VUDO', 'СММ 800$', -800]);
+      ws.addRow([new Date(Date.UTC(2026, 10, 21)), 'Витрата', 'Маркетинг', 'Фейсбук', 'VUDO', 'Реклама', null, -100]);
+    });
+    const r = await a.agent.post('/api/finance/cash/import').set('X-VUDO', '1').attach('file', buf, 'облік.xlsx');
+    expect(r.body).toMatchObject({ added: 1, usd: 0 });
+    expect(r.body.skipped).toHaveLength(2);
+    const r2 = await a.agent.post('/api/finance/cash/import?usdRate=41.5').set('X-VUDO', '1').attach('file', buf, 'облік.xlsx');
+    expect(r2.body).toMatchObject({ added: 2, duplicates: 1, usd: 0, skipped: [] });
+    const rows = (await a.get('/api/finance/cash?month=')).body.rows.filter((x: { account: string }) => x.account === 'USD');
+    expect(rows.map((x: { usd: number; rate: number; sum: number }) => [x.usd, x.rate, x.sum]).sort()).toEqual([[-800, 41.5, -33200], [800, 41.5, 33200]]);
+    const again = await a.agent.post('/api/finance/cash/import?usdRate=42').set('X-VUDO', '1').attach('file', buf, 'облік.xlsx');
+    expect(again.body).toMatchObject({ added: 0, duplicates: 3 });
   });
 
   it('план P&L: місяці з заголовка, назви рядків, витрати без знака', async () => {
@@ -432,7 +475,7 @@ describe('позики і рахунки до оплати', () => {
     await a.post(`/api/orders/${o.id}/payments`, { sum: 2500, type: 'аванс', method: 'рахунок ТОВ', date: today });
     await a.post(`/api/orders/${o.id}/payments`, { sum: 700, type: 'аванс', method: 'рахунок ФОП', date: today });
     await a.post('/api/finance/cash', expense(o.id, 500, { account: 'ТОВ' }));
-    expect((await a.get('/api/finance/cash')).body.balances).toEqual({ by: { 'Готівка': 6000, 'ТОВ': 2000, 'Карта': 0, 'ФОП': 700 }, total: 8700 });
+    expect((await a.get('/api/finance/cash')).body.balances).toEqual({ by: { 'Готівка': 6000, 'ТОВ': 2000, 'Карта': 0, 'ФОП': 700 }, total: 8700, usd: { usd: 0, uah: 0 } });
   });
 
   it('«Рекламація» — окремий рядок P&L', async () => {

@@ -11,7 +11,7 @@
 import ExcelJS from 'exceljs';
 import type pg from 'pg';
 import { writeLog } from '../audit.js';
-import { ART_TYPES, FUTURE_CLOSED, FUTURE_CLOSED_LABEL, INVEST_LINES, LINE_KIND, PNL_LINES, planSigned, type Account, type PnlLine } from '@vudo/shared';
+import { ART_TYPES, FUTURE_CLOSED, FUTURE_CLOSED_LABEL, INVEST_LINES, LINE_KIND, PNL_LINES, planSigned, USD_ACCOUNT, type Account, type CashAccount, type PnlLine } from '@vudo/shared';
 
 type Cell = ExcelJS.CellValue;
 
@@ -61,6 +61,7 @@ export interface ImportReport {
   skipped: { row: number; reason: string }[];
   articlesAdded: number;
   byAccount: Record<Account, number>;
+  usd: number;
 }
 
 interface CashImportRow {
@@ -70,12 +71,14 @@ interface CashImportRow {
   obj: string;
   counterparty: string;
   note: string;
-  account: Account;
+  account: CashAccount;
   sum: number;
+  usd?: number | null;
+  rate?: number | null;
 }
 
 /** Розбирає аркуш обліку (за назвами колонок у рядку заголовка). */
-export function parseCashSheet(ws: ExcelJS.Worksheet): { rows: CashImportRow[]; skipped: ImportReport['skipped']; total: number } {
+export function parseCashSheet(ws: ExcelJS.Worksheet, usdRate: number | null = null): { rows: CashImportRow[]; skipped: ImportReport['skipped']; total: number } {
   let headerRow = 0;
   const col: Record<string, number> = {};
   ws.eachRow((row, i) => {
@@ -119,13 +122,19 @@ export function parseCashSheet(ws: ExcelJS.Worksheet): { rows: CashImportRow[]; 
     total++;
     if (!d) return void skipped.push({ row: i, reason: 'немає дати' });
     if (!(ART_TYPES as readonly string[]).includes(type)) return void skipped.push({ row: i, reason: `невідома стаття «${type}»` });
-    if (usd) return void skipped.push({ row: i, reason: 'сума в USD — валютної каси ще немає' });
     const base = { date: d, type, cat: str(g(col.cat)), obj: str(g(col.obj)), counterparty: str(g(col.cp)), note: str(g(col.note)) };
+    if (usd) {
+      if (!usdRate) skipped.push({ row: i, reason: 'сума в USD — вкажіть курс долара при імпорті' });
+      else {
+        const u = Math.round(usd * 100) / 100;
+        out.push({ ...base, account: USD_ACCOUNT, usd: u, rate: usdRate, sum: Math.round(u * usdRate * 100) / 100 });
+      }
+    }
     if (uah) out.push({ ...base, account: 'Карта', sum: Math.round(uah * 100) / 100 });
     if (cash) out.push({ ...base, account: 'Готівка', sum: Math.round(cash * 100) / 100 });
     if (tov) out.push({ ...base, account: 'ТОВ', sum: Math.round(tov * 100) / 100 });
     if (fop) out.push({ ...base, account: 'ФОП', sum: Math.round(fop * 100) / 100 });
-    if (!uah && !cash && !tov && !fop) skipped.push({ row: i, reason: 'немає суми' });
+    if (!uah && !cash && !tov && !fop && !usd) skipped.push({ row: i, reason: 'немає суми' });
   });
   return { rows: out, skipped, total };
 }
@@ -139,22 +148,22 @@ export async function importCash(c: pg.PoolClient, rows: CashImportRow[], userId
   // Тому порівнюємо кількість: у файлі N однакових, у базі вже M → додаємо N − M.
   const groups = new Map<string, CashImportRow[]>();
   for (const r of rows) {
-    const k = JSON.stringify([r.date, r.note, r.sum, r.account]);
+    const k = JSON.stringify([r.date, r.note, r.usd ?? r.sum, r.account]);
     groups.set(k, [...(groups.get(k) ?? []), r]);
   }
   for (const list of groups.values()) {
     const r = list[0]!;
     const ex = await c.query<{ n: number }>(
-      `SELECT count(*)::int AS n FROM cash_ops WHERE date = $1 AND note = $2 AND sum = $3 AND account = $4`,
-      [r.date, r.note, r.sum, r.account],
+      `SELECT count(*)::int AS n FROM cash_ops WHERE date = $1 AND note = $2 AND account = $4 AND (CASE WHEN account = 'USD' THEN usd ELSE sum END) = $3`,
+      [r.date, r.note, r.usd ?? r.sum, r.account],
     );
     const have = ex.rows[0]!.n;
     duplicates += Math.min(have, list.length);
     for (const x of list.slice(have)) {
       await c.query(
-        `INSERT INTO cash_ops (date, type, cat, obj, counterparty, note, account, sum, source, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'import',$9)`,
-        [x.date, x.type, x.cat, x.obj, x.counterparty, x.note, x.account, x.sum, userId],
+        `INSERT INTO cash_ops (date, type, cat, obj, counterparty, note, account, sum, usd, rate, source, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'import',$11)`,
+        [x.date, x.type, x.cat, x.obj, x.counterparty, x.note, x.account, x.sum, x.usd ?? null, x.rate ?? null, userId],
       );
       added++;
     }

@@ -6,7 +6,7 @@ import { Router, type Request, type Response } from 'express';
 import multer from 'multer';
 import { z } from 'zod';
 import type pg from 'pg';
-import { ACCOUNTS, ART_TYPES, PNL_LINES, findArticle, fmtDate, kyivToday, lineLabel, money, typeSign } from '@vudo/shared';
+import { ACCOUNTS, ART_TYPES, CASH_ACCOUNTS, PNL_LINES, USD_ACCOUNT, findArticle, fmtDate, kyivToday, lineLabel, money, typeSign, usd as usdFmt } from '@vudo/shared';
 import { pool, tx } from '../db.js';
 import { badRequest, notFound } from '../errors.js';
 import { me, requireOwner } from '../auth/middleware.js';
@@ -70,9 +70,11 @@ const opSchema = z.object({
   orderId: z.number().int().positive().nullable().default(null),
   counterparty: z.string().trim().max(200).default(''),
   note: z.string().trim().max(1000).default(''),
-  account: z.enum(ACCOUNTS),
-  /** Без мінуса — знак визначає стаття */
+  account: z.enum(CASH_ACCOUNTS),
+  /** Без мінуса — знак визначає стаття. Для каси USD — у доларах. */
   amount: z.number().positive('Вкажіть суму більше 0.').max(1_000_000_000),
+  /** Курс гривні за $1 — лише для каси USD */
+  rate: z.number().positive('Вкажіть курс більше 0.').max(10_000).nullish(),
   /** «Сплатити» з постійних витрат — посилання на пункт */
   fixedId: z.number().int().positive().nullable().default(null),
 });
@@ -88,6 +90,8 @@ interface OpRow {
   note: string;
   account: string;
   sum: number;
+  usd: number | null;
+  rate: number | null;
 }
 
 /** Перевірка операції за статейником; для підстатті «до замовлення» — замовлення обов'язкове, об'єкт = «№ · клієнт». */
@@ -107,11 +111,19 @@ async function normalize(c: pg.PoolClient, b: z.infer<typeof opSchema>) {
     obj = o.rows[0].label;
     orderId = b.orderId;
   }
-  const sum = Math.round(typeSign(b.type) * b.amount * 100) / 100;
-  return { ...b, obj, orderId, sum, counterparty: b.counterparty || art?.defaultCp || 'VUDO', line: art?.line ?? 'none' };
+  const sign = typeSign(b.type);
+  const isUsd = b.account === USD_ACCOUNT;
+  if (isUsd && !b.rate) throw badRequest('Вкажіть курс долара.', 'rate');
+  const rate = isUsd ? Math.round(b.rate! * 10000) / 10000 : null;
+  const usd = isUsd ? Math.round(sign * b.amount * 100) / 100 : null;
+  const sum = Math.round(sign * b.amount * (rate ?? 1) * 100) / 100;
+  return { ...b, obj, orderId, sum, usd, rate, counterparty: b.counterparty || art?.defaultCp || 'VUDO', line: art?.line ?? 'none' };
 }
 
 const opLabel = (x: { type: string; cat: string }) => [x.type, x.cat].filter(Boolean).join('/');
+/** «−800,00 $ (курс 41,5 = −33 200,00 грн)» для USD, інакше гривні. */
+const opMoney = (x: { sum: number; usd: number | null; rate: number | null }) =>
+  x.usd != null ? `${usdFmt(x.usd)} (курс ${String(x.rate).replace('.', ',')} = ${money(x.sum)})` : money(x.sum);
 
 financeRouter.post('/finance/cash', async (req, res) => {
   const b = opSchema.parse(req.body);
@@ -119,15 +131,15 @@ financeRouter.post('/finance/cash', async (req, res) => {
   await tx(async (c) => {
     const v = await normalize(c, b);
     await c.query(
-      `INSERT INTO cash_ops (date, type, cat, obj, order_id, counterparty, note, account, sum, fixed_id, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-      [v.date, v.type, v.cat, v.obj, v.orderId, v.counterparty, v.note, v.account, v.sum, v.fixedId, u.id],
+      `INSERT INTO cash_ops (date, type, cat, obj, order_id, counterparty, note, account, sum, usd, rate, fixed_id, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+      [v.date, v.type, v.cat, v.obj, v.orderId, v.counterparty, v.note, v.account, v.sum, v.usd, v.rate, v.fixedId, u.id],
     );
     await writeLog(c, {
       userId: u.id,
       orderId: v.orderId,
       folder: 'fin',
       finScope: 'report',
-      text: `Облік: ${opLabel(v)} ${money(v.sum)}${v.note ? ` · ${v.note}` : ''}`,
+      text: `Облік: ${opLabel(v)} ${opMoney(v)}${v.note ? ` · ${v.note}` : ''}`,
     });
   });
   res.status(201).json({ ok: true });
@@ -135,7 +147,7 @@ financeRouter.post('/finance/cash', async (req, res) => {
 
 async function lockOp(c: pg.PoolClient, id: number): Promise<OpRow> {
   const r = await c.query<OpRow>(
-    `SELECT id, date, type, cat, obj, order_id AS "orderId", counterparty, note, account, sum FROM cash_ops WHERE id = $1 FOR UPDATE`,
+    `SELECT id, date, type, cat, obj, order_id AS "orderId", counterparty, note, account, sum, usd, rate FROM cash_ops WHERE id = $1 FOR UPDATE`,
     [id],
   );
   if (!r.rows[0]) throw notFound('Операцію не знайдено.');
@@ -158,13 +170,13 @@ financeRouter.patch('/finance/cash/:id', async (req, res) => {
       diffLine('контрагент', old.counterparty, v.counterparty),
       diffLine('примітка', old.note, v.note),
       diffLine('каса', old.account, v.account),
-      diffLine('сума', money(old.sum), money(v.sum)),
+      diffLine('сума', opMoney(old), opMoney(v)),
     ].filter(Boolean);
     if (!ch.length) throw badRequest('Змін немає.');
     await c.query(
-      `UPDATE cash_ops SET date=$2, type=$3, cat=$4, obj=$5, order_id=$6, counterparty=$7, note=$8, account=$9, sum=$10,
-              updated_at = now(), updated_by = $11 WHERE id = $1`,
-      [id, v.date, v.type, v.cat, v.obj, v.orderId, v.counterparty, v.note, v.account, v.sum, u.id],
+      `UPDATE cash_ops SET date=$2, type=$3, cat=$4, obj=$5, order_id=$6, counterparty=$7, note=$8, account=$9, sum=$10, usd=$11, rate=$12,
+              updated_at = now(), updated_by = $13 WHERE id = $1`,
+      [id, v.date, v.type, v.cat, v.obj, v.orderId, v.counterparty, v.note, v.account, v.sum, v.usd, v.rate, u.id],
     );
     const text = `Облік: змінено операцію від ${fmtDate(old.date)} (${[old.cat, old.note].filter(Boolean).join(' · ')}) — ${ch.join('; ')}`;
     const orders = [...new Set([old.orderId, v.orderId])];
@@ -185,10 +197,47 @@ financeRouter.delete('/finance/cash/:id', async (req, res) => {
       orderId: old.orderId,
       folder: 'fin',
       finScope: 'report',
-      text: `Облік: видалено операцію від ${fmtDate(old.date)} — ${opLabel(old)} ${money(old.sum)}${old.note ? ` · ${old.note}` : ''}`,
+      text: `Облік: видалено операцію від ${fmtDate(old.date)} — ${opLabel(old)} ${opMoney(old)}${old.note ? ` · ${old.note}` : ''}`,
     });
   });
   res.json({ ok: true });
+});
+
+/**
+ * Обмін валюти: купівля $ — гривні з каси → каса USD; продаж — навпаки.
+ * Дві операції «Інші / Обмін коштів» (не в P&L), гривневий еквівалент однаковий з обох боків.
+ */
+financeRouter.post('/finance/cash/exchange', async (req, res) => {
+  const b = z
+    .object({
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Вкажіть дату.'),
+      direction: z.enum(['buy', 'sell']),
+      account: z.enum(ACCOUNTS),
+      usd: z.number().positive('Вкажіть суму в доларах.').max(100_000_000),
+      rate: z.number().positive('Вкажіть курс більше 0.').max(10_000),
+      note: z.string().trim().max(1000).default(''),
+    })
+    .parse(req.body);
+  const u = me(req);
+  const usdAmt = Math.round(b.usd * 100) / 100;
+  const rate = Math.round(b.rate * 10000) / 10000;
+  const uah = Math.round(usdAmt * rate * 100) / 100;
+  const buy = b.direction === 'buy';
+  const r = String(rate).replace('.', ',');
+  const note = [buy ? `Купівля ${usdFmt(usdAmt)} за курсом ${r}` : `Продаж ${usdFmt(usdAmt)} за курсом ${r}`, b.note].filter(Boolean).join(' · ');
+  await tx(async (c) => {
+    const ins = (type: string, account: string, sum: number, usdV: number | null, rateV: number | null) =>
+      c.query(
+        `INSERT INTO cash_ops (date, type, cat, obj, counterparty, note, account, sum, usd, rate, created_by) VALUES ($1,$2,'Інші','Обмін коштів','VUDO',$3,$4,$5,$6,$7,$8)`,
+        [b.date, type, note, account, sum, usdV, rateV, u.id],
+      );
+    // гривнева каса
+    await ins(buy ? 'Витрата' : 'Дохід', b.account, buy ? -uah : uah, null, null);
+    // каса USD
+    await ins(buy ? 'Дохід' : 'Витрата', USD_ACCOUNT, buy ? uah : -uah, buy ? usdAmt : -usdAmt, rate);
+    await writeLog(c, { userId: u.id, folder: 'fin', finScope: 'report', text: `Облік: обмін валюти — ${note}; ${b.account} ${money(buy ? -uah : uah)}` });
+  });
+  res.status(201).json({ ok: true, uah });
 });
 
 /* ---------- 10.8 Статейник ---------- */
@@ -613,9 +662,10 @@ financeRouter.post('/finance/cash/import', async (req, res) => {
     throw badRequest('Файл не читається як Excel (.xlsx).');
   });
   const ws = wb.worksheets.find((w) => w.name.trim() === 'Облік') ?? wb.worksheets[0]!;
+  const usdRate = z.coerce.number().positive().max(10_000).optional().catch(undefined).parse(req.query.usdRate) ?? null;
   let parsed;
   try {
-    parsed = parseCashSheet(ws);
+    parsed = parseCashSheet(ws, usdRate);
   } catch (e) {
     throw badRequest((e as Error).message);
   }
@@ -634,6 +684,7 @@ financeRouter.post('/finance/cash/import', async (req, res) => {
     ...r,
     skipped: parsed.skipped,
     byAccount: Object.fromEntries(ACCOUNTS.map((a) => [a, Math.round(parsed.rows.filter((x) => x.account === a).reduce((t, x) => t + x.sum, 0) * 100) / 100])),
+    usd: Math.round(parsed.rows.reduce((t, x) => t + (x.usd ?? 0), 0) * 100) / 100,
   });
 });
 

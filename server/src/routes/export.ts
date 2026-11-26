@@ -321,11 +321,14 @@ async function financeSheets(req: Request, u: User): Promise<Sheet[]> {
         { h: 'Примітка', k: 'note' },
         { h: 'Рядок P&L', k: 'lineName' },
         ...ACCOUNTS.map((a) => ({ h: `${a}, грн`, k: a, t: 'money' as Kind })),
+        { h: 'USD, $', k: 'USD', t: 'money' as Kind },
+        { h: 'Курс', k: 'rate' },
+        { h: 'USD у грн', k: 'usdUah', t: 'money' as Kind },
       ],
       rows: cash.rows.map((r) => ({
         ...r,
         lineName: lineLabel(String(r.line)),
-        [String(r.account)]: r.sum,
+        ...(r.account === 'USD' ? { USD: r.usd, usdUah: r.sum } : { [String(r.account)]: r.sum }),
       })),
     },
     {

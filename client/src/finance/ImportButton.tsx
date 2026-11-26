@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { ACCOUNTS, moneyKop as money, type Account } from '@vudo/shared';
+import { ACCOUNTS, moneyKop as money, usd, type Account } from '@vudo/shared';
 import { api, errorText } from '../api';
 import { Modal } from '../ui/common';
 import { useToast } from '../ui/toast';
@@ -12,6 +12,7 @@ interface CashReport {
   articlesAdded: number;
   skipped: { row: number; reason: string }[];
   byAccount: Record<Account, number>;
+  usd: number;
 }
 
 /** Кнопка імпорту з Excel (.xlsx) і звіт про результат. kind: облік або план P&L. */
@@ -21,13 +22,19 @@ export function ImportButton({ kind }: { kind: 'cash' | 'pnl' }) {
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [report, setReport] = useState<CashReport | null>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [rate, setRate] = useState('');
+  const rateNum = Number(rate.replace(',', '.').replace(/\s/g, ''));
+  const usdSkipped = report?.skipped.filter((s) => s.reason.includes('USD')).length ?? 0;
 
-  async function upload(f: File) {
+  async function upload(f: File, usdRate?: number) {
     setBusy(true);
+    setFile(f);
     try {
       const form = new FormData();
       form.append('file', f, f.name);
-      const r = await api.upload<CashReport & { cells?: number; months?: string[] }>(kind === 'cash' ? '/finance/cash/import' : '/finance/pnl/import', form);
+      const url = kind === 'cash' ? `/finance/cash/import${usdRate ? `?usdRate=${usdRate}` : ''}` : '/finance/pnl/import';
+      const r = await api.upload<CashReport & { cells?: number; months?: string[] }>(url, form);
       for (const k of ['finance', 'log', 'order']) void qc.invalidateQueries({ queryKey: [k] });
       if (kind === 'cash') setReport(r);
       else toast(`P&L імпортовано: ${r.cells} значень${r.months?.length ? ` (${r.months[0]} – ${r.months.at(-1)})` : ''}`);
@@ -63,9 +70,21 @@ export function ImportButton({ kind }: { kind: 'cash' | 'pnl' }) {
             </div>
           </div>
           <div className="note num">
-            У файлі: {ACCOUNTS.map((a) => `${a} ${money(report.byAccount[a])}`).join(', ')}.
+            У файлі: {ACCOUNTS.map((a) => `${a} ${money(report.byAccount[a])}`).join(', ')}
+            {report.usd ? `, USD ${usd(report.usd)}` : ''}.
             {report.articlesAdded ? ` До статейника додано нових підстатей: ${report.articlesAdded} — перевірте для них рядок P&L.` : ''}
           </div>
+          {usdSkipped > 0 && file && (
+            <div className="bar" style={{ alignItems: 'flex-end' }}>
+              <label className="f grow">
+                У файлі є суми в доларах ({usdSkipped}). Курс, грн за $1:
+                <input inputMode="decimal" value={rate} placeholder="напр. 41,50" onChange={(e) => setRate(e.target.value)} />
+              </label>
+              <button type="button" className="btn pri" disabled={!(rateNum > 0) || busy} onClick={() => upload(file, rateNum)}>
+                Додати USD-рядки
+              </button>
+            </div>
+          )}
           {!!report.skipped.length && (
             <div className="warnbox">
               Пропущено рядків: {report.skipped.length}

@@ -1,6 +1,6 @@
 import { useDeferredValue, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { ACCOUNTS, ART_TYPES, PNL_LINES, fmtDate, isOwner, kop, lineLabel, moneyKop as money, type Account } from '@vudo/shared';
+import { ACCOUNTS, ART_TYPES, PNL_LINES, fmtDate, isOwner, kop, kyivToday, lineLabel, moneyKop as money, usd, type Account } from '@vudo/shared';
 import { api, errorText } from '../api';
 import { useMe } from '../session';
 import { useDrawer } from '../orders/hooks';
@@ -70,7 +70,7 @@ interface CashData {
   total: number;
   inflow: number;
   outflow: number;
-  balances: { by: Record<Account, number>; total: number };
+  balances: { by: Record<Account, number>; total: number; usd: { usd: number; uah: number } };
   months: string[];
   today: string;
 }
@@ -85,6 +85,7 @@ function CashTab() {
   const [cat, setCat] = useState('');
   const [text, setText] = useState('');
   const [modal, setModal] = useState<{ edit?: CashRow } | null>(null);
+  const [exchange, setExchange] = useState(false);
   const q = useDeferredValue(text);
   const params = new URLSearchParams({ type, cat, q, ...(month != null ? { month } : {}) });
   const d = useQuery({ queryKey: ['finance', 'cash', month, type, cat, q], queryFn: () => api.get<CashData>(`/finance/cash?${params}`) });
@@ -119,7 +120,7 @@ function CashTab() {
       </div>
       <div className="sums" style={{ marginBottom: 14 }}>
         <div style={{ background: 'var(--accent-soft)' }}>
-          <small>Залишок загальний</small>
+          <small>Залишок загальний, грн</small>
           <b style={{ fontWeight: 600 }} className={(b?.total ?? 0) < 0 ? 'debt' : ''}>
             {money(b?.total ?? 0)}
           </b>
@@ -140,6 +141,13 @@ function CashTab() {
             <b className={(b?.by[a] ?? 0) < 0 ? 'debt' : ''}>{money(b?.by[a] ?? 0)}</b>
           </div>
         ))}
+        <div>
+          <small>Залишок USD</small>
+          <b className={(b?.usd.usd ?? 0) < 0 ? 'debt' : ''}>{usd(b?.usd.usd ?? 0)}</b>
+          <span className="muted" style={{ fontSize: 11.5 }}>
+            ≈ {money(b?.usd.uah ?? 0)} за курсом внесення
+          </span>
+        </div>
       </div>
       <div className="bar">
         <select value={month ?? cur} onChange={(e) => setMonth(e.target.value)} aria-label="Місяць">
@@ -164,6 +172,9 @@ function CashTab() {
         </select>
         <input placeholder="Пошук: об'єкт, примітка, контрагент" value={text} onChange={(e) => setText(e.target.value)} style={{ flex: 1, minWidth: 180 }} aria-label="Пошук" />
         <ImportButton kind="cash" />
+        <button type="button" className="btn" onClick={() => setExchange(true)}>
+          Обмін валюти
+        </button>
         <button type="button" className="btn pri" onClick={() => setModal({})}>
           + Операція
         </button>
@@ -184,6 +195,7 @@ function CashTab() {
                   {a}, грн
                 </th>
               ))}
+              <th className="r">USD, $</th>
               <th />
             </tr>
           </thead>
@@ -215,6 +227,16 @@ function CashTab() {
                     {e.account === a ? plain(e.sum) : ''}
                   </td>
                 ))}
+                <td className={`r num ${(e.usd ?? 0) < 0 ? 'debt' : ''}`} title={e.usd != null ? `курс ${e.rate} · ${money(e.sum)}` : undefined}>
+                  {e.usd != null && (
+                    <>
+                      {plain(e.usd)}
+                      <small className="muted" style={{ display: 'block' }}>
+                        × {String(e.rate).replace('.', ',')}
+                      </small>
+                    </>
+                  )}
+                </td>
                 <td style={{ whiteSpace: 'nowrap' }}>
                   {!e.derived && (
                     <>
@@ -240,7 +262,81 @@ function CashTab() {
         статейника. Імпорт з Excel не дублює вже внесені операції (звірка за датою, приміткою, сумою й касою).
       </div>
       {modal && <CashModal edit={modal.edit} onClose={() => setModal(null)} />}
+      {exchange && <ExchangeModal onClose={() => setExchange(false)} />}
     </>
+  );
+}
+
+/** Обмін валюти: купівля або продаж доларів за курсом; дві операції «Інші / Обмін коштів», у P&L не йдуть. */
+function ExchangeModal({ onClose }: { onClose: () => void }) {
+  const toast = useToast();
+  const refresh = useRefreshFinance();
+  const [v, setV] = useState({ date: kyivToday(), direction: 'buy' as 'buy' | 'sell', account: 'Готівка' as Account, usd: '', rate: '', note: '' });
+  const [err, setErr] = useState('');
+  const n = (x: string) => Number(x.replace(',', '.').replace(/\s/g, ''));
+  const uah = n(v.usd) > 0 && n(v.rate) > 0 ? n(v.usd) * n(v.rate) : 0;
+  const save = useMutation({
+    mutationFn: () => api.post('/finance/cash/exchange', { ...v, usd: n(v.usd), rate: n(v.rate) }),
+    onSuccess: () => (refresh(), toast('Обмін записано'), onClose()),
+    onError: (e) => setErr(errorText(e)),
+  });
+  return (
+    <Modal
+      onClose={onClose}
+      onSubmit={() => (!(n(v.usd) > 0) ? setErr('Вкажіть суму в доларах.') : !(n(v.rate) > 0) ? setErr('Вкажіть курс.') : save.mutate())}
+      labelledBy="ex-title"
+    >
+      <h2 id="ex-title">Обмін валюти</h2>
+      <div className="grid">
+        <label className="f">
+          Дата
+          <input type="date" value={v.date} onChange={(e) => setV({ ...v, date: e.target.value })} />
+        </label>
+        <label className="f">
+          Операція
+          <select value={v.direction} onChange={(e) => setV({ ...v, direction: e.target.value as 'buy' | 'sell' })}>
+            <option value="buy">Купівля $ (гривні → USD)</option>
+            <option value="sell">Продаж $ (USD → гривні)</option>
+          </select>
+        </label>
+        <label className="f">
+          Сума, $ *
+          <input inputMode="decimal" value={v.usd} onChange={(e) => setV({ ...v, usd: e.target.value })} />
+        </label>
+        <label className="f">
+          Курс, грн за $1 *
+          <input inputMode="decimal" value={v.rate} placeholder="напр. 41,50" onChange={(e) => setV({ ...v, rate: e.target.value })} />
+        </label>
+        <label className="f">
+          {v.direction === 'buy' ? 'З каси (гривні)' : 'У касу (гривні)'}
+          <select value={v.account} onChange={(e) => setV({ ...v, account: e.target.value as Account })}>
+            {ACCOUNTS.map((a) => (
+              <option key={a}>{a}</option>
+            ))}
+          </select>
+        </label>
+        <label className="f">
+          Примітка
+          <input value={v.note} onChange={(e) => setV({ ...v, note: e.target.value })} />
+        </label>
+      </div>
+      <div className="note">
+        {uah
+          ? v.direction === 'buy'
+            ? `З каси «${v.account}» спишеться ${money(uah)}, у касу USD надійде ${usd(n(v.usd))}.`
+            : `З каси USD спишеться ${usd(n(v.usd))}, у касу «${v.account}» надійде ${money(uah)}.`
+          : 'Обмін не впливає на P&L — це переказ між касами.'}
+      </div>
+      <WarnBox>{err}</WarnBox>
+      <div className="act">
+        <button type="button" className="btn" onClick={onClose}>
+          Скасувати
+        </button>
+        <button type="submit" className="btn pri" disabled={save.isPending}>
+          Записати
+        </button>
+      </div>
+    </Modal>
   );
 }
 
