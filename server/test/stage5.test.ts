@@ -110,14 +110,14 @@ describe('експорт в Excel (12А)', () => {
     expect(await logTexts()).toContain('Експорт в Excel: Замовлення');
   });
 
-  it('фінанси: власник — 7 аркушів, менеджер — 2', async () => {
+  it('фінанси: власник — 8 аркушів, менеджер — 3', async () => {
     await makeUser('admin', ['Адмін']);
     await makeUser('iryna', ['Менеджер']);
     const a = await loginAs('admin');
     const wa = await sheetsOf((await bin(a.agent.get('/api/export/finance'))).body);
-    expect(wa.worksheets.map((w) => w.name)).toEqual(['Облік', 'P&L', 'Оплати', 'Борги', 'Дизайнерам', 'Постійні витрати', 'Статейник']);
+    expect(wa.worksheets.map((w) => w.name)).toEqual(['Облік', 'P&L', 'Оплати', 'Борги', 'Борги без замовлень', 'Дизайнерам', 'Постійні витрати', 'Статейник']);
     const m = await loginAs('iryna');
     const wm = await sheetsOf((await bin(m.agent.get('/api/export/finance'))).body);
-    expect(wm.worksheets.map((w) => w.name)).toEqual(['Оплати', 'Борги']);
+    expect(wm.worksheets.map((w) => w.name)).toEqual(['Оплати', 'Борги', 'Борги без замовлень']);
   });
 });

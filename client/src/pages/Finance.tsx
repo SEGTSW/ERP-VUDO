@@ -27,7 +27,7 @@ export function Finance() {
     ? [
         ['cash', 'Облік'],
         ['pnl', 'P&L'],
-        ['debt', 'Борги клієнтів'],
+        ['debt', 'Борги'],
         ['des', 'Дизайнерам'],
         ['sal', 'Нарахування ЗП'],
         ['fixed', 'Постійні витрати'],
@@ -37,7 +37,7 @@ export function Finance() {
         ['arts', 'Статейник'],
       ]
     : [
-        ['debt', 'Борги клієнтів'],
+        ['debt', 'Борги'],
       ];
   const [tab, setTab] = useState<Tab>(tabs[0]![0]);
   return (

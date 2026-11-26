@@ -135,6 +135,30 @@ describe('оплати, борги, дизайнерам, нарахування
     expect((await m.get('/api/money/salaries')).status).toBe(403);
   });
 
+  it('борги без замовлень: менеджер додає, повернення йде доходом в облік, списання', async () => {
+    const { a } = await setup();
+    const m = await loginAs('iryna');
+    expect((await m.post('/api/money/other-debts', { debtor: 'Петро', reason: 'позика', amount: 1000.55, date: '2026-11-01', dueDate: '2026-11-10' })).status).toBe(201);
+    let d = (await m.get('/api/money/debts')).body;
+    expect(d.other[0]).toMatchObject({ debtor: 'Петро', amount: 1000.55, left: 1000.55, status: 'Прострочено' });
+    expect(d.otherTotal).toBe(1000.55);
+    const id = d.other[0].id;
+    expect((await m.post(`/api/money/other-debts/${id}/pay`, { date: '2026-11-20', sum: 2000, account: 'Готівка' })).status).toBe(400);
+    expect((await m.post(`/api/money/other-debts/${id}/pay`, { date: '2026-11-20', sum: 400.55, account: 'Готівка' })).status).toBe(201);
+    d = (await m.get('/api/money/debts')).body;
+    expect(d.other[0]).toMatchObject({ paid: 400.55, left: 600, status: 'Прострочено' });
+    const cash = (await a.get('/api/finance/cash?month=')).body;
+    expect(cash.rows.find((r: { counterparty: string }) => r.counterparty === 'Петро')).toMatchObject({ type: 'Дохід', cat: 'Інші', sum: 400.55, account: 'Готівка' });
+    expect((await m.del(`/api/money/other-debts/${id}`)).status).toBe(400); // є повернення
+    expect((await m.patch(`/api/money/other-debts/${id}`, { writtenOff: true })).status).toBe(200);
+    d = (await m.get('/api/money/debts')).body;
+    expect(d.other[0].status).toBe('Списано');
+    expect(d.otherTotal).toBe(0);
+    await m.del(`/api/money/other-debt-payments/${d.other[0].payments[0].id}`);
+    expect((await a.get('/api/finance/cash?month=')).body.rows.some((r: { counterparty: string }) => r.counterparty === 'Петро')).toBe(false);
+    expect((await m.del(`/api/money/other-debts/${id}`)).status).toBe(200);
+  });
+
   it('бонус дизайнеру нараховується з договором; виплата — в обліку як «Співпраці»', async () => {
     const { a, ids } = await setup();
     const des = (await a.post('/api/clients', { name: 'Оксана', type: 'дизайнер-партнер', company: 'Простір', bonusPct: 10 })).body;

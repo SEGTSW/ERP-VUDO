@@ -253,7 +253,7 @@ async function clientsSheets(req: Request, kind: 'clients' | 'designers'): Promi
 
 async function financeSheets(req: Request, u: User): Promise<Sheet[]> {
   const pay = await internal<{ rows: Row[] }>(req, '/money/payments');
-  const debts = await internal<{ rows: Row[] }>(req, '/money/debts');
+  const debts = await internal<{ rows: Row[]; other: Row[] }>(req, '/money/debts');
   const paySheet: Sheet = {
     name: 'Оплати',
     cols: [
@@ -283,8 +283,24 @@ async function financeSheets(req: Request, u: User): Promise<Sheet[]> {
     ],
     rows: debts.rows,
   };
+  const otherSheet: Sheet = {
+    name: 'Борги без замовлень',
+    cols: [
+      { h: 'Хто винен', k: 'debtor' },
+      { h: 'Телефон', k: 'phone' },
+      { h: 'За що', k: 'reason' },
+      { h: 'Дата', k: 'date', t: 'date' },
+      { h: 'Повернути до', k: 'dueDate', t: 'date' },
+      { h: 'Сума', k: 'amount', t: 'money' },
+      { h: 'Повернено', k: 'paid', t: 'money' },
+      { h: 'Залишок', k: 'left', t: 'money' },
+      { h: 'Стан', k: 'status' },
+      { h: 'Примітка', k: 'note' },
+    ],
+    rows: debts.other,
+  };
   // Менеджер: лише Оплати і Борги
-  if (!isOwner(u)) return [paySheet, debtSheet];
+  if (!isOwner(u)) return [paySheet, debtSheet, otherSheet];
 
   const cash = await internal<{ rows: Row[] }>(req, '/finance/cash?month=');
   const year = Number(kyivToday().slice(0, 4));
@@ -328,6 +344,7 @@ async function financeSheets(req: Request, u: User): Promise<Sheet[]> {
     },
     paySheet,
     debtSheet,
+    otherSheet,
     {
       name: 'Дизайнерам',
       cols: [

@@ -1,10 +1,12 @@
 import { Fragment, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { PAYMENT_METHODS, addDays, fmtDate, kyivToday, moneyKop as money, type Status } from '@vudo/shared';
+import { ACCOUNTS, PAYMENT_METHODS, addDays, isOwner, fmtDate, kyivToday, moneyKop as money, type Status } from '@vudo/shared';
 import { api, errorText } from '../api';
 import { useDrawer } from '../orders/hooks';
 import { useManagers } from '../pages/Orders';
-import { Modal, NumberField, WarnBox } from '../ui/common';
+import { ConfirmButton, Modal, NumberField, WarnBox } from '../ui/common';
+import { useMe } from '../session';
+import type { ArticleRow } from './CashModal';
 import { RowLink, StatusPill } from '../ui/bits';
 import { useToast } from '../ui/toast';
 
@@ -70,8 +72,29 @@ function ManagerSelect({ value, onChange }: { value: string; onChange: (v: strin
 
 /* ---------- 10.4 Борги клієнтів ---------- */
 
+interface OtherDebt {
+  id: number;
+  debtor: string;
+  phone: string | null;
+  reason: string | null;
+  amount: number;
+  date: string;
+  dueDate: string | null;
+  cat: string;
+  obj: string;
+  note: string | null;
+  writtenOff: boolean;
+  byName: string | null;
+  paid: number;
+  left: number;
+  status: string;
+  payments: { id: number; date: string; sum: number; account: string; cashOpId: number | null; byName: string | null }[];
+}
 interface DebtData {
   rows: { orderId: number; num: string; client: string; phone: string | null; status: Status; managerName: string; installDate: string | null; price: number; paid: number; debt: number }[];
+  other: OtherDebt[];
+  ordersTotal: number;
+  otherTotal: number;
   total: number;
   afterInstall: number;
 }
@@ -99,7 +122,12 @@ export function DebtsTab() {
           <small>Борг після монтажу</small>
           <b className={d?.afterInstall ? 'debt' : ''}>{money(d?.afterInstall ?? 0)}</b>
         </div>
+        <div>
+          <small>Борги без замовлень</small>
+          <b className={d?.otherTotal ? 'debt' : ''}>{money(d?.otherTotal ?? 0)}</b>
+        </div>
       </div>
+      <h3 style={{ margin: '4px 0 8px' }}>По замовленнях · {money(d?.ordersTotal ?? 0)}</h3>
       <div className="tbl-wrap">
         <table>
           <thead>
@@ -140,7 +168,293 @@ export function DebtsTab() {
       <div className="note" style={{ marginTop: 12 }}>
         Тут лише замовлення з підписаним договором. Звернення й прорахунки без договору боргом не вважаються.
       </div>
+      <OtherDebts rows={d?.other ?? []} total={d?.otherTotal ?? 0} />
     </>
+  );
+}
+
+const DEBT_PILL: Record<string, string> = { Прострочено: 'g-bad', Погашено: 'g-done', Списано: 'g-done', Частково: 'g-work', 'Не сплачено': 'g-work' };
+const toNum = (s: string) => Number(s.replace(',', '.').replace(/\s/g, ''));
+
+function useRefreshDebts() {
+  const qc = useQueryClient();
+  return () => {
+    for (const k of ['finance', 'log']) void qc.invalidateQueries({ queryKey: [k] });
+  };
+}
+
+/** Борги без замовлень: позичили працівнику, переплата постачальнику, інше. */
+function OtherDebts({ rows, total }: { rows: OtherDebt[]; total: number }) {
+  const [open, setOpen] = useState<number | null>(null);
+  const [edit, setEdit] = useState<OtherDebt | 'new' | null>(null);
+  const [pay, setPay] = useState<OtherDebt | null>(null);
+  const toast = useToast();
+  const refresh = useRefreshDebts();
+  const del = useMutation({
+    mutationFn: (id: number) => api.del(`/money/other-debt-payments/${id}`),
+    onSuccess: () => (refresh(), toast('Повернення видалено')),
+    onError: (e) => toast(errorText(e), true),
+  });
+  return (
+    <>
+      <div className="bar" style={{ marginTop: 22 }}>
+        <h3 className="grow" style={{ margin: 0 }}>
+          Без замовлень · {money(total)}
+        </h3>
+        <button type="button" className="btn pri" onClick={() => setEdit('new')}>
+          + Борг
+        </button>
+      </div>
+      <div className="tbl-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Хто винен</th>
+              <th>За що</th>
+              <th>Дата</th>
+              <th>Повернути до</th>
+              <th className="r">Сума</th>
+              <th className="r">Повернено</th>
+              <th className="r">Залишок</th>
+              <th>Стан</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((x) => (
+              <Fragment key={x.id}>
+                <RowLink className={x.writtenOff || x.left <= 0 ? 'muted' : undefined} onOpen={() => setOpen(open === x.id ? null : x.id)}>
+                  <td>
+                    <div>{x.debtor}</div>
+                    {x.phone && <small className="muted num">{x.phone}</small>}
+                  </td>
+                  <td>
+                    {x.reason ?? '—'}
+                    {x.note && <small className="muted" style={{ display: 'block' }}>{x.note}</small>}
+                  </td>
+                  <td className="num">{fmtDate(x.date)}</td>
+                  <td className="num">{fmtDate(x.dueDate)}</td>
+                  <td className="r num">{money(x.amount)}</td>
+                  <td className="r num">{money(x.paid)}</td>
+                  <td className={`r num ${x.left > 0 && !x.writtenOff ? 'debt' : ''}`}>{money(x.left)}</td>
+                  <td>
+                    <span className={`pill ${DEBT_PILL[x.status] ?? ''}`}>{x.status}</span>
+                  </td>
+                  <td className="r" onClick={(e) => e.stopPropagation()}>
+                    <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+                      <button type="button" className="btn sm pri" disabled={x.left <= 0 || x.writtenOff} onClick={() => setPay(x)}>
+                        Повернення
+                      </button>
+                      <button type="button" className="btn sm" onClick={() => setEdit(x)}>
+                        ✎
+                      </button>
+                    </div>
+                  </td>
+                </RowLink>
+                {open === x.id && (
+                  <tr className="sub">
+                    <td colSpan={9}>
+                      {x.payments.length ? (
+                        <div className="list">
+                          {x.payments.map((p) => (
+                            <div className="li" key={p.id}>
+                              <div className="m">
+                                {fmtDate(p.date)} · повернення · каса: {p.account}
+                                <small>
+                                  {[p.byName, p.cashOpId ? 'в обліку' : 'не в обліку'].filter(Boolean).join(' · ')}
+                                </small>
+                              </div>
+                              <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                <b className="num" style={{ fontWeight: 500 }}>+{money(p.sum)}</b>
+                                <ConfirmButton className="mini" onConfirm={() => del.mutate(p.id)}>
+                                  ✕
+                                </ConfirmButton>
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="muted">Повернень ще немає. Вніс(ла): {x.byName ?? '—'}</div>
+                      )}
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            ))}
+          </tbody>
+        </table>
+        {!rows.length && <div className="empty">Боргів без замовлень немає. Натисніть «+ Борг».</div>}
+      </div>
+      <div className="note" style={{ marginTop: 12 }}>
+        Борги, не пов'язані із замовленнями: позичили працівнику, переплатили постачальнику тощо. Повернення можна одразу записати доходом в облік —
+        зніміть галочку, якщо рух уже є в обліку.
+      </div>
+      {edit && <OtherDebtModal item={edit === 'new' ? null : edit} onClose={() => setEdit(null)} />}
+      {pay && <OtherDebtPayModal d={pay} onClose={() => setPay(null)} />}
+    </>
+  );
+}
+
+function OtherDebtModal({ item, onClose }: { item: OtherDebt | null; onClose: () => void }) {
+  const { user } = useMe();
+  const owner = isOwner(user);
+  const toast = useToast();
+  const refresh = useRefreshDebts();
+  const arts = useQuery({ queryKey: ['finance', 'articles'], queryFn: () => api.get<ArticleRow[]>('/finance/articles'), enabled: owner }).data ?? [];
+  const cats = [...new Set(arts.filter((a) => !a.hidden && a.type === 'Дохід').map((a) => a.cat))];
+  const [v, setV] = useState({
+    debtor: item?.debtor ?? '',
+    phone: item?.phone ?? '',
+    reason: item?.reason ?? '',
+    amount: item ? String(item.amount) : '',
+    date: item?.date ?? kyivToday(),
+    dueDate: item?.dueDate ?? '',
+    cat: item?.cat ?? 'Інші',
+    obj: item?.obj ?? '',
+    note: item?.note ?? '',
+  });
+  const [err, setErr] = useState('');
+  const body = () => ({ ...v, amount: toNum(v.amount), dueDate: v.dueDate || null });
+  const save = useMutation({
+    mutationFn: () => (item ? api.patch(`/money/other-debts/${item.id}`, body()) : api.post('/money/other-debts', body())),
+    onSuccess: () => (refresh(), toast('Збережено'), onClose()),
+    onError: (e) => setErr(errorText(e)),
+  });
+  const writeOff = useMutation({
+    mutationFn: () => api.patch(`/money/other-debts/${item!.id}`, { writtenOff: !item!.writtenOff }),
+    onSuccess: () => (refresh(), onClose()),
+    onError: (e) => setErr(errorText(e)),
+  });
+  const remove = useMutation({
+    mutationFn: () => api.del(`/money/other-debts/${item!.id}`),
+    onSuccess: () => (refresh(), toast('Борг видалено'), onClose()),
+    onError: (e) => setErr(errorText(e)),
+  });
+  return (
+    <Modal
+      onClose={onClose}
+      onSubmit={() => (!v.debtor.trim() ? setErr('Вкажіть, хто винен.') : !(toNum(v.amount) > 0) ? setErr('Вкажіть суму більше 0.') : save.mutate())}
+      labelledBy="od-title"
+    >
+      <h2 id="od-title">{item ? 'Борг без замовлення' : 'Новий борг без замовлення'}</h2>
+      <div className="grid">
+        <label className="f">
+          Хто винен *
+          <input value={v.debtor} onChange={(e) => setV({ ...v, debtor: e.target.value })} />
+        </label>
+        <label className="f">
+          Телефон
+          <input value={v.phone} inputMode="tel" onChange={(e) => setV({ ...v, phone: e.target.value })} />
+        </label>
+        <label className="f">
+          За що
+          <input value={v.reason} placeholder="позика працівнику, переплата…" onChange={(e) => setV({ ...v, reason: e.target.value })} />
+        </label>
+        <label className="f">
+          Сума, грн *
+          <input inputMode="decimal" value={v.amount} onChange={(e) => setV({ ...v, amount: e.target.value })} />
+        </label>
+        <label className="f">
+          Дата
+          <input type="date" value={v.date} onChange={(e) => setV({ ...v, date: e.target.value })} />
+        </label>
+        <label className="f">
+          Повернути до
+          <input type="date" value={v.dueDate} onChange={(e) => setV({ ...v, dueDate: e.target.value })} />
+        </label>
+        {owner && (
+          <>
+            <label className="f">
+              Підстаття доходу в обліку
+              <select value={v.cat} onChange={(e) => setV({ ...v, cat: e.target.value })}>
+                {[...new Set([v.cat, ...cats])].map((c) => (
+                  <option key={c}>{c}</option>
+                ))}
+              </select>
+            </label>
+            <label className="f">
+              Об'єкт
+              <input value={v.obj} onChange={(e) => setV({ ...v, obj: e.target.value })} />
+            </label>
+          </>
+        )}
+      </div>
+      <label className="f">
+        Примітка
+        <input value={v.note} onChange={(e) => setV({ ...v, note: e.target.value })} />
+      </label>
+      <WarnBox>{err}</WarnBox>
+      <div className="act">
+        {item && (
+          <>
+            {!item.payments.length && (
+              <ConfirmButton className="btn warn" onConfirm={() => remove.mutate()}>
+                Видалити
+              </ConfirmButton>
+            )}
+            <button type="button" className="btn warn" style={{ marginRight: 'auto' }} onClick={() => writeOff.mutate()}>
+              {item.writtenOff ? 'Відновити' : 'Списати борг'}
+            </button>
+          </>
+        )}
+        <button type="button" className="btn" onClick={onClose}>
+          Закрити
+        </button>
+        <button type="submit" className="btn pri" disabled={save.isPending}>
+          Зберегти
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function OtherDebtPayModal({ d, onClose }: { d: OtherDebt; onClose: () => void }) {
+  const toast = useToast();
+  const refresh = useRefreshDebts();
+  const [v, setV] = useState({ date: kyivToday(), sum: String(d.left), account: 'Готівка', toCash: true });
+  const [err, setErr] = useState('');
+  const save = useMutation({
+    mutationFn: () => api.post(`/money/other-debts/${d.id}/pay`, { ...v, sum: toNum(v.sum) }),
+    onSuccess: () => (refresh(), toast('Повернення записано'), onClose()),
+    onError: (e) => setErr(errorText(e)),
+  });
+  return (
+    <Modal onClose={onClose} onSubmit={() => (toNum(v.sum) > 0 ? save.mutate() : setErr('Вкажіть суму більше 0.'))} labelledBy="odp-title">
+      <div className="muted" style={{ fontSize: 12 }}>
+        {d.debtor} · залишок {money(d.left)}
+      </div>
+      <h2 id="odp-title">Повернення боргу</h2>
+      <div className="grid">
+        <label className="f">
+          Дата
+          <input type="date" value={v.date} onChange={(e) => setV({ ...v, date: e.target.value })} />
+        </label>
+        <label className="f">
+          Сума, грн *
+          <input inputMode="decimal" value={v.sum} onChange={(e) => setV({ ...v, sum: e.target.value })} />
+        </label>
+        <label className="f">
+          Каса
+          <select value={v.account} onChange={(e) => setV({ ...v, account: e.target.value })}>
+            {ACCOUNTS.map((a) => (
+              <option key={a}>{a}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <label className="chk">
+        <input type="checkbox" checked={v.toCash} onChange={(e) => setV({ ...v, toCash: e.target.checked })} /> Записати дохід в облік — зніміть, якщо гроші вже є в обліку
+      </label>
+      <WarnBox>{err}</WarnBox>
+      <div className="act">
+        <button type="button" className="btn" onClick={onClose}>
+          Скасувати
+        </button>
+        <button type="submit" className="btn pri" disabled={save.isPending}>
+          Записати
+        </button>
+      </div>
+    </Modal>
   );
 }
 
