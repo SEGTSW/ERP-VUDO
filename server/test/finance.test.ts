@@ -459,6 +459,41 @@ describe('первинні документи', () => {
   });
 });
 
+describe('первинні документи: імпорт', () => {
+  it('аркуш ТОВ / ФОП, вид, напрям, сума, дата; повторно — без дублів; поганий рядок пропускається', async () => {
+    const { a } = await setup();
+    const [tov, fop] = (await a.get('/api/primary-docs')).body.entities;
+    const ExcelJS = (await import('exceljs')).default;
+    const wb = new ExcelJS.Workbook();
+    const t = wb.addWorksheet('ТОВ');
+    t.addRow(['Реєстр первинних документів']);
+    t.addRow(['Дата', 'Вид документа', 'Номер', 'Постачальник', 'Зміст', 'Сума', 'Оплата', 'Де зберігається', 'Примітки']);
+    t.addRow([new Date(Date.UTC(2026, 10, 3)), 'Видаткова накладна', '№ 15', 'Віяр', 'ДСП', 12500.5, 'оплачено', 'Офіс, шафа 1', '']);
+    t.addRow(['05.11.2026', 'Рахунок-фактура', '77', 'Блюм', 'Петлі', '3 200,00 грн', 'ні', '', '']);
+    t.addRow(['06.11.2026', 'Довіреність', '3', 'Нова пошта', '', '', '', '', 'прим']);
+    t.addRow(['07.11.2026', 'Рахунок', '8', 'Тест', '', 'abc', '', '', '']);
+    const f = wb.addWorksheet('ФОП');
+    f.addRow(['Дата', 'Вид', 'Вхідний / вихідний', 'Контрагент', 'Сума']);
+    f.addRow(['10.11.2026', 'Акт', 'вихідний', 'Олена', 30000]);
+    const buf = Buffer.from(await wb.xlsx.writeBuffer());
+    const up = (id: number) => a.agent.post(`/api/primary-docs/import/${id}`).set('X-VUDO', '1').attach('files', buf, 'реєстр.xlsx');
+    expect((await up(tov.id)).body).toEqual({ added: 4, duplicates: 0, skipped: 0 });
+    expect((await up(tov.id)).body).toEqual({ added: 0, duplicates: 4, skipped: 0 });
+    expect((await up(fop.id)).body).toEqual({ added: 1, duplicates: 0, skipped: 0 });
+    const rows = (await a.get('/api/primary-docs')).body.rows;
+    const by = (n: string) => rows.find((r: { counterparty: string }) => r.counterparty === n);
+    expect(by('Віяр')).toMatchObject({ entityId: tov.id, kind: 'Видаткова накладна', direction: 'Вхідний', num: '15', docDate: '2026-11-03', amount: 12500.5, payStatus: 'Оплачено', location: 'Офіс, шафа 1' });
+    expect(by('Блюм')).toMatchObject({ kind: 'Рахунок', amount: 3200, payStatus: 'Не оплачено', docDate: '2026-11-05' });
+    expect(by('Нова пошта')).toMatchObject({ kind: 'Інший документ', note: 'Вид у файлі: Довіреність. прим', amount: null });
+    expect(by('Тест')).toMatchObject({ amount: null });
+    expect(by('Олена')).toMatchObject({ entityId: fop.id, kind: 'Акт виконаних робіт', direction: 'Вихідний', amount: 30000 });
+    // вручну можна додавати далі
+    expect((await a.agent.post('/api/primary-docs').set('X-VUDO', '1').send({ entityId: tov.id, counterparty: 'Ще один' })).status).toBe(201);
+    const m = await loginAs('iryna');
+    expect((await m.agent.post(`/api/primary-docs/import/${tov.id}`).set('X-VUDO', '1').attach('files', buf, 'r.xlsx')).status).toBe(403);
+  });
+});
+
 describe('P&L з файлу замовника', () => {
   it('факт, «До», примітки: місяці з фактом беруть дані з файлу до копійки; можна повернути облік', async () => {
     const { a, o } = await setup();

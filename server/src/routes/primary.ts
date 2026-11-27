@@ -1,6 +1,7 @@
 /** Документи → «Первинні документи» (лише власник): реєстр рахунків, накладних, актів по ТОВ і ФОП, з файлами. */
-import { Router } from 'express';
-import { unlink } from 'node:fs/promises';
+import { Router, type Request, type Response } from 'express';
+import type ExcelJS from 'exceljs';
+import { readFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { CONTRACT_STORAGE, PRIMARY_DIRECTIONS, PRIMARY_KINDS, PRIMARY_PAY, fmtDate, moneyKop } from '@vudo/shared';
@@ -9,6 +10,7 @@ import { pool, tx, type Db } from '../db.js';
 import { badRequest, notFound } from '../errors.js';
 import { me, requireOwner } from '../auth/middleware.js';
 import { diffLine, writeLog } from '../audit.js';
+import { loadWorkbook, parseDate } from '../finance/import.js';
 import { receive, sendStored } from './files.js';
 
 export const primaryRouter = Router();
@@ -174,4 +176,172 @@ primaryRouter.delete('/primary-docs/files/:id', async (req, res) => {
   });
   await unlink(path.join(config.uploadDir, key)).catch(() => {});
   res.json({ ok: true });
+});
+
+/* ---------- Імпорт з Excel ---------- */
+
+type Field = 'docDate' | 'kind' | 'direction' | 'num' | 'counterparty' | 'supplier' | 'buyer' | 'subject' | 'amount' | 'payStatus' | 'storage' | 'location' | 'note';
+/** Заголовки колонок (без урахування регістру); перший збіг виграє. */
+const HEADERS: [RegExp, Field][] = [
+  [/^дата/, 'docDate'],
+  [/^(вид|тип)/, 'kind'],
+  [/^(вхідн|вихідн|напрям)/, 'direction'],
+  [/^(№|номер)/, 'num'],
+  [/^(контрагент|від кого|кому)/, 'counterparty'],
+  [/^(постачальник|продавець)/, 'supplier'],
+  [/^(покупець|замовник|клієнт)/, 'buyer'],
+  [/^(зміст|найменуван|призначен|предмет|за що|опис)/, 'subject'],
+  [/^сума/, 'amount'],
+  [/^(оплат|статус)/, 'payStatus'],
+  [/^де зберіга/, 'location'],
+  [/^(зберіга|оригінал|наявн)/, 'storage'],
+  [/^(приміт|коментар)/, 'note'],
+];
+
+const kindOf = (v: string): (typeof PRIMARY_KINDS)[number] | null => {
+  const x = v.toLowerCase();
+  if (!x) return 'Рахунок';
+  if (x.includes('рахун')) return 'Рахунок';
+  if (x.includes('податк')) return 'Податкова накладна';
+  if (x.includes('наклад')) return 'Видаткова накладна';
+  if (x.startsWith('акт') || x.includes(' акт')) return 'Акт виконаних робіт';
+  return null;
+};
+const payOf = (v: string): (typeof PRIMARY_PAY)[number] => {
+  const x = v.toLowerCase().trim();
+  if (!x) return '';
+  if (x.startsWith('частк')) return 'Частково';
+  if (x.startsWith('не') || x === 'ні') return 'Не оплачено';
+  if (x.startsWith('оплач') || x === 'так' || x === '+') return 'Оплачено';
+  return '';
+};
+const storageOf = (v: string): (typeof CONTRACT_STORAGE)[number] => {
+  const x = v.toLowerCase();
+  const phys = x.includes('фізич') || x.includes('паперов') || x.includes('оригінал') || x.includes('обидва') || x === 'так' || x === 'є';
+  const el = x.includes('електрон') || x.includes('скан') || x.includes('обидва');
+  return phys && el ? 'Фізично і електронно' : phys ? 'Фізично' : el ? 'Електронно' : '';
+};
+const amountOf = (v: unknown): number | null => {
+  if (typeof v === 'number' && Number.isFinite(v)) return Math.abs(v);
+  if (typeof v === 'string') {
+    const n = Number(v.replace(/грн\.?|₴/gi, '').replace(/\s/g, '').replace(',', '.'));
+    return v.trim() && Number.isFinite(n) ? Math.abs(n) : null;
+  }
+  return null;
+};
+/** Значення клітинки: для формул — результат. */
+const raw = (c: ExcelJS.Cell): unknown => {
+  const v = c.value as unknown;
+  return v && typeof v === 'object' && !(v instanceof Date) && 'result' in v ? (v as { result: unknown }).result : v;
+};
+
+export function parsePrimary(ws: ExcelJS.Worksheet, entityId: number): { rows: Doc[]; skipped: number } {
+  const text = (c: ExcelJS.Cell) => {
+    const v = raw(c);
+    if (v instanceof Date) return fmtDate(v.toISOString().slice(0, 10));
+    return c.text.replace(/\s+/g, ' ').trim();
+  };
+  let header = 0;
+  const col = new Map<Field, number>();
+  ws.eachRow((row, i) => {
+    if (header) return;
+    const found = new Map<Field, number>();
+    row.eachCell((c, k) => {
+      const h = text(c).toLowerCase();
+      const m = HEADERS.find(([re]) => re.test(h));
+      if (m && !found.has(m[1])) found.set(m[1], k);
+    });
+    if (found.has('counterparty') || found.has('supplier') || found.has('buyer')) {
+      header = i;
+      for (const [k, v] of found) col.set(k, v);
+    }
+  });
+  if (!header) throw badRequest('Не знайдено рядок заголовка з колонкою «Контрагент» (або «Постачальник» / «Покупець»).');
+  const out: Doc[] = [];
+  let skipped = 0;
+  ws.eachRow((row, i) => {
+    if (i <= header) return;
+    const cell = (k: Field) => (col.has(k) ? row.getCell(col.get(k)!) : null);
+    const g = (k: Field) => {
+      const c = cell(k);
+      return c ? text(c) : '';
+    };
+    const supplier = g('supplier');
+    const buyer = g('buyer');
+    const counterparty = g('counterparty') || supplier || buyer;
+    if (!counterparty) {
+      if (row.actualCellCount) skipped++;
+      return;
+    }
+    const d = g('direction').toLowerCase();
+    const direction = d.startsWith('вих') ? 'Вихідний' : d.startsWith('вх') ? 'Вхідний' : !g('counterparty') && buyer && !supplier ? 'Вихідний' : 'Вхідний';
+    const kindText = g('kind');
+    const kind = kindOf(kindText);
+    const note = [kind ? '' : `Вид у файлі: ${kindText}`, g('note')].filter(Boolean).join('. ');
+    const dc = cell('docDate');
+    const ac = cell('amount');
+    const parsed = schema.safeParse({
+      entityId,
+      kind: kind ?? 'Інший документ',
+      direction,
+      num: g('num').replace(/^№\s*/, ''),
+      docDate: dc ? parseDate(raw(dc)) : null,
+      counterparty,
+      subject: g('subject'),
+      amount: ac ? amountOf(raw(ac)) : null,
+      payStatus: payOf(g('payStatus')),
+      storage: storageOf(g('storage')),
+      location: g('location'),
+      note,
+    });
+    if (parsed.success) out.push(parsed.data);
+    else skipped++;
+  });
+  return { rows: out, skipped };
+}
+
+/** Аркуш для юрособи: з «ТОВ» / «ФОП» у назві, якщо такий є; інакше — перший. */
+function sheetFor(wb: ExcelJS.Workbook, entityName: string): ExcelJS.Worksheet {
+  const key = entityName.toLowerCase().startsWith('фоп') ? 'фоп' : entityName.toLowerCase().startsWith('тов') ? 'тов' : null;
+  return (key && wb.worksheets.find((w) => w.name.toLowerCase().includes(key))) || wb.worksheets[0]!;
+}
+
+primaryRouter.post('/primary-docs/import/:entityId', async (req: Request, res: Response) => {
+  const entityId = idOf(req.params.entityId);
+  const u = me(req);
+  await receive(req, res);
+  const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+  try {
+    const f = files[0];
+    if (!f || !/\.xlsx$/i.test(f.originalname)) throw badRequest('Потрібен файл Excel (.xlsx).');
+    const wb = await loadWorkbook(await readFile(f.path)).catch(() => {
+      throw badRequest('Файл не читається як Excel (.xlsx).');
+    });
+    const r = await tx(async (c) => {
+      const ent = await checkEntity(c, entityId);
+      const { rows, skipped } = parsePrimary(sheetFor(wb, ent), entityId);
+      let added = 0;
+      for (const b of rows) {
+        // Уже внесені (той самий вид, номер, дата, контрагент і сума) не дублюються
+        const ex = await c.query(
+          `SELECT 1 FROM primary_docs WHERE entity_id = $1 AND kind = $2 AND num = $3 AND doc_date IS NOT DISTINCT FROM $4::date
+              AND counterparty = $5 AND amount IS NOT DISTINCT FROM $6::numeric`,
+          [entityId, b.kind, b.num, b.docDate, b.counterparty, b.amount],
+        );
+        if (ex.rowCount) continue;
+        await c.query(
+          `INSERT INTO primary_docs (entity_id, kind, direction, num, doc_date, counterparty, subject, amount, pay_status, storage, location, note, created_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+          [...values(b), u.id],
+        );
+        added++;
+      }
+      const x = { added, duplicates: rows.length - added, skipped };
+      await log(c, u.id, `Первинні документи · ${ent}: імпорт з файлу — додано ${x.added}, уже були ${x.duplicates}${skipped ? `, пропущено ${skipped}` : ''}`);
+      return x;
+    });
+    res.json(r);
+  } finally {
+    await Promise.all(files.map((f) => unlink(f.path).catch(() => {})));
+  }
 });

@@ -29,6 +29,10 @@ interface Doc {
 }
 
 const ACCEPT = ['image/*', ...FILE_EXTENSIONS.map((e) => `.${e}`)].join(',');
+const IMPORT_HINT =
+  'Імпорт з Excel (.xlsx) — у відкриту вкладку (ТОВ або ФОП). Якщо у файлі кілька аркушів, береться аркуш з «ТОВ» / «ФОП» у назві. ' +
+  'Колонки: Дата, Вид (рахунок / накладна / акт), Вхідний / вихідний, Номер, Контрагент (або Постачальник / Покупець), Зміст, Сума, Оплата, ' +
+  'Зберігання, Де зберігається, Примітки — обов\'язковий лише контрагент. Повторний імпорт додає тільки нові документи; вручну можна додавати далі.';
 const PAY_PILL: Record<string, string> = { 'Оплачено': 'g-done', 'Частково': 'g-work', 'Не оплачено': 'g-bad' };
 
 function useRefresh() {
@@ -40,6 +44,9 @@ function useRefresh() {
 
 /** Документи → «Первинні документи»: реєстр рахунків, накладних, актів та інших документів по ТОВ і ФОП. */
 export function PrimaryDocs() {
+  const toast = useToast();
+  const refresh = useRefresh();
+  const imp = useRef<HTMLInputElement>(null);
   const q = useQuery({ queryKey: ['primary-docs'], queryFn: () => api.get<{ entities: Entity[]; rows: Doc[] }>('/primary-docs') });
   const [sel, setSel] = useState<number | null>(null);
   const [text, setText] = useState('');
@@ -67,6 +74,19 @@ export function PrimaryDocs() {
   );
   const sum = (d: string) => rows.filter((r) => r.direction === d).reduce((t, r) => t + (r.amount ?? 0), 0);
   const current = typeof edit === 'number' ? all.find((r) => r.id === edit) : null;
+  const upload = useMutation({
+    mutationFn: (f: File) => {
+      const form = new FormData();
+      form.append('files', f, f.name);
+      return api.upload<{ added: number; duplicates: number; skipped: number }>(`/primary-docs/import/${ent!.id}`, form);
+    },
+    onSuccess: (r) => {
+      refresh();
+      toast(`${ent?.name}: додано ${r.added}, уже були ${r.duplicates}${r.skipped ? `, пропущено рядків ${r.skipped}` : ''}`);
+    },
+    onError: (e) => toast(errorText(e), true),
+    onSettled: () => imp.current && (imp.current.value = ''),
+  });
   return (
     <>
       <div className="seg" style={{ marginBottom: 12 }}>
@@ -105,6 +125,10 @@ export function PrimaryDocs() {
         </label>
         <label className="chk">
           <input type="checkbox" checked={archived} onChange={(e) => setArchived(e.target.checked)} /> Архів
+        </label>
+        <label className="btn" style={{ cursor: 'pointer' }} title={IMPORT_HINT}>
+          {upload.isPending ? 'Імпорт…' : 'Імпорт з Excel'}
+          <input ref={imp} type="file" accept=".xlsx" hidden disabled={upload.isPending || !ent} onChange={(e) => e.target.files?.[0] && upload.mutate(e.target.files[0])} />
         </label>
         <button type="button" className="btn pri" disabled={!ent} onClick={() => setEdit('new')}>
           + Документ
@@ -154,13 +178,14 @@ export function PrimaryDocs() {
         </table>
         {q.isPending && <div className="empty">Завантаження…</div>}
         {q.isError && <div className="warnbox">{errorText(q.error)}</div>}
-        {q.isSuccess && !rows.length && <div className="empty">Документів немає. Натисніть «+ Документ».</div>}
+        {q.isSuccess && !rows.length && <div className="empty">Документів немає. Натисніть «+ Документ» або «Імпорт з Excel».</div>}
       </div>
       {!!rows.length && (
         <div className="note" style={{ marginTop: 10 }}>
           Документів: {rows.length} · вхідні: {kop(sum('Вхідний'))} грн · вихідні: {kop(sum('Вихідний'))} грн
         </div>
       )}
+      <div className="note" style={{ marginTop: 10 }}>{IMPORT_HINT}</div>
       {(edit === 'new' || current) && ent && (
         <DocModal key={edit} item={current ?? null} entities={ents} entityId={ent.id} onCreated={setEdit} onClose={() => setEdit(null)} />
       )}
