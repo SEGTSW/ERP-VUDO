@@ -118,6 +118,29 @@ describe('P&L (10.2)', () => {
     const mgr = await loginAs('iryna');
     expect((await mgr.get('/api/finance/pnl')).status).toBe(403);
   });
+
+  it('факт можна виправити вручну; потік і залишок — з обліку; очищення повертає порахований', async () => {
+    const { a, o } = await setup();
+    await a.post('/api/finance/cash', expense(o.id, 4000));
+    const m = today.slice(0, 7);
+    const y = today.slice(0, 4);
+    await a.agent.put('/api/finance/pnl/plan').set('X-VUDO', '1').send({ month: m, line: 'futureClosed', amount: 1000 });
+    // витрати без мінуса → від'ємна сума; «Витрати на замовлення» — як показано (з урахуванням закритих майбутніх)
+    expect((await a.agent.put('/api/finance/pnl/fact').set('X-VUDO', '1').send({ month: m, line: 'orderCost', amount: 3500 })).status).toBe(200);
+    await a.agent.put('/api/finance/pnl/fact').set('X-VUDO', '1').send({ month: m, line: 'admin', amount: 700.5 });
+    let p = (await a.get(`/api/finance/pnl?year=${y}`)).body;
+    expect(p.fact[m]).toMatchObject({ income: 6000, orderCost: -4500, admin: -700.5, net: 2000 });
+    expect(p.overrides).toEqual(expect.arrayContaining([
+      { month: m, line: 'orderCost', amount: -3500, computed: -3000 },
+      { month: m, line: 'admin', amount: -700.5, computed: null },
+    ]));
+    expect(norm((await logTexts()).at(-1)!)).toBe(`P&L факт ${m} · Адміністративні витрати: пораховано → -700,50 грн`);
+    await a.agent.put('/api/finance/pnl/fact').set('X-VUDO', '1').send({ month: m, line: 'orderCost', amount: null });
+    p = (await a.get(`/api/finance/pnl?year=${y}`)).body;
+    expect(p.fact[m].orderCost).toBe(-4000);
+    const mgr = await loginAs('iryna');
+    expect((await mgr.agent.put('/api/finance/pnl/fact').set('X-VUDO', '1').send({ month: m, line: 'admin', amount: 1 })).status).toBe(403);
+  });
 });
 
 describe('оплати, борги, дизайнерам, нарахування (10.3–10.6)', () => {
@@ -387,6 +410,52 @@ describe('договори', () => {
     expect((await up()).body).toEqual({ added: 0, duplicates: 1 });
     row = (await a.get('/api/contracts')).body.rows.find((x: { counterparty: string }) => x.counterparty === 'Вибір');
     expect(row).toMatchObject({ responsible: 'ЄД', amountText: '65000,05 грн.', num: '№7', signedOn: '2026-10-22', status: 'Діючий', note: 'прим', scanUrl: 'https://example.com/a' });
+  });
+
+  it('де зберігається документ: фізично / електронно і місце; у журналі й імпорті', async () => {
+    const { a } = await setup();
+    const entityId = (await a.get('/api/contracts')).body.entities[0].id;
+    const { id } = (await a.post('/api/contracts', { entityId, counterparty: 'Тех', storage: 'Фізично', location: 'Офіс, шафа 2' })).body;
+    expect((await a.agent.put(`/api/contracts/${id}`).set('X-VUDO', '1').send({ entityId, counterparty: 'Тех', storage: 'десь' })).status).toBe(400);
+    await a.agent.put(`/api/contracts/${id}`).set('X-VUDO', '1').send({ entityId, counterparty: 'Тех', storage: 'Фізично і електронно', location: 'Офіс, шафа 2; Google Drive' });
+    expect((await a.get('/api/contracts')).body.rows[0]).toMatchObject({ storage: 'Фізично і електронно', location: 'Офіс, шафа 2; Google Drive' });
+    expect(norm((await logTexts()).at(-1)!)).toBe('Договір «Тех»: зберігання: Фізично → Фізично і електронно; де зберігається: Офіс, шафа 2 → Офіс, шафа 2; Google Drive');
+    const ExcelJS = (await import('exceljs')).default;
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Аркуш1');
+    ws.addRow(['Контрагент', 'Предмет договору', 'Зберігання', 'Де зберігається']);
+    ws.addRow(['Вибір', 'Купівля', 'електронний', 'Drive / Договори']);
+    const buf = Buffer.from(await wb.xlsx.writeBuffer());
+    await a.agent.post(`/api/contracts/import/${entityId}`).set('X-VUDO', '1').attach('files', buf, 'd.xlsx');
+    expect((await a.get('/api/contracts')).body.rows.find((x: { counterparty: string }) => x.counterparty === 'Вибір')).toMatchObject({ storage: 'Електронно', location: 'Drive / Договори' });
+  });
+});
+
+describe('первинні документи', () => {
+  it('лише власник; лише ТОВ і ФОП; реєстр, зміни в журналі, файл, архів, експорт', async () => {
+    const { a } = await setup();
+    const d = (await a.get('/api/primary-docs')).body;
+    expect(d.entities.map((e: { name: string }) => e.name)).toEqual(['ТОВ «ВУДО»', 'ФОП Єфімов Д. М.']);
+    const fiz = (await a.get('/api/contracts')).body.entities.find((e: { name: string }) => e.name.startsWith('Фізична')).id;
+    const entityId = d.entities[0].id;
+    expect((await a.agent.post('/api/primary-docs').set('X-VUDO', '1').send({ entityId: fiz, counterparty: 'Віяр' })).status).toBe(400);
+    expect((await a.agent.post('/api/primary-docs').set('X-VUDO', '1').send({ entityId, counterparty: 'Віяр', amount: -5 })).status).toBe(400);
+    const r = await a.agent.post('/api/primary-docs').set('X-VUDO', '1')
+      .send({ entityId, kind: 'Видаткова накладна', direction: 'Вхідний', num: '15', docDate: '2026-11-03', counterparty: 'Віяр', subject: 'ДСП', amount: 12500.5, storage: 'Фізично', location: 'Офіс, шафа 1' });
+    expect(r.status).toBe(201);
+    expect(norm((await logTexts()).at(-1)!)).toBe('Первинні документи · ТОВ «ВУДО»: додано Видаткова накладна №15 від 03.11.2026 · Віяр, 12 500,50 грн');
+    await a.agent.put(`/api/primary-docs/${r.body.id}`).set('X-VUDO', '1')
+      .send({ entityId, kind: 'Видаткова накладна', num: '15', docDate: '2026-11-03', counterparty: 'Віяр', subject: 'ДСП', amount: 12500.5, payStatus: 'Оплачено', storage: 'Фізично', location: 'Офіс, шафа 1' });
+    expect(norm((await logTexts()).at(-1)!)).toBe('Видаткова накладна №15 від 03.11.2026 · Віяр: оплата: — → Оплачено');
+    expect((await a.agent.post(`/api/primary-docs/${r.body.id}/files`).set('X-VUDO', '1').attach('files', Buffer.from('%PDF-1'), 'накладна.pdf')).status).toBe(201);
+    const row = (await a.get('/api/primary-docs')).body.rows[0];
+    expect(row).toMatchObject({ kind: 'Видаткова накладна', direction: 'Вхідний', docDate: '2026-11-03', amount: 12500.5, payStatus: 'Оплачено', location: 'Офіс, шафа 1', files: [{ name: 'накладна.pdf' }] });
+    expect((await a.get(`/api/primary-docs/files/${row.files[0].id}`)).status).toBe(200);
+    expect((await a.get('/api/export/primary')).status).toBe(200);
+    expect((await a.agent.patch(`/api/primary-docs/${r.body.id}/archive`).set('X-VUDO', '1').send({ archived: true })).status).toBe(200);
+    expect((await a.get('/api/primary-docs')).body.rows[0].archived).toBe(true);
+    const m = await loginAs('iryna');
+    for (const u of ['/api/primary-docs', `/api/primary-docs/files/${row.files[0].id}`, '/api/export/primary']) expect((await m.get(u)).status).toBe(403);
   });
 });
 

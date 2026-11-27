@@ -4,7 +4,7 @@ import ExcelJS from 'exceljs';
 import { readFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
-import { CONTRACT_KINDS, CONTRACT_STATUSES, fmtDate } from '@vudo/shared';
+import { CONTRACT_KINDS, CONTRACT_STATUSES, CONTRACT_STORAGE, fmtDate } from '@vudo/shared';
 import { config } from '../config.js';
 import { pool, tx, type Db } from '../db.js';
 import { badRequest, notFound } from '../errors.js';
@@ -27,7 +27,7 @@ contractsRouter.get('/contracts', async (_req, res) => {
   const entities = await pool.query('SELECT id, name FROM legal_entities ORDER BY pos, id');
   const rows = await pool.query<{ id: number }>(
     `SELECT id, entity_id AS "entityId", kind, counterparty, responsible, subject, amount_text AS "amountText", num, signed_on AS "signedOn",
-            ends_text AS "endsText", status, original, origin, note, scan_url AS "scanUrl", archived
+            ends_text AS "endsText", status, original, origin, storage, location, note, scan_url AS "scanUrl", archived
        FROM contracts ORDER BY archived, signed_on DESC NULLS LAST, id DESC`,
   );
   const files = await pool.query<{ contractId: number }>(
@@ -64,6 +64,8 @@ const schema = z.object({
   status: z.enum(CONTRACT_STATUSES).default(''),
   original: t(300),
   origin: t(300),
+  storage: z.enum(CONTRACT_STORAGE).default(''),
+  location: t(300),
   note: t(4000),
   scanUrl: z
     .string()
@@ -75,11 +77,11 @@ const schema = z.object({
 });
 type Contract = z.infer<typeof schema>;
 
-const values = (b: Contract) => [b.entityId, b.kind, b.counterparty, b.responsible, b.subject, b.amountText, b.num, b.signedOn, b.endsText, b.status, b.original, b.origin, b.note, b.scanUrl];
+const values = (b: Contract) => [b.entityId, b.kind, b.counterparty, b.responsible, b.subject, b.amountText, b.num, b.signedOn, b.endsText, b.status, b.original, b.origin, b.note, b.scanUrl, b.storage, b.location];
 async function insert(c: Db, b: Contract, userId: number): Promise<number> {
   const r = await c.query<{ id: number }>(
-    `INSERT INTO contracts (entity_id, kind, counterparty, responsible, subject, amount_text, num, signed_on, ends_text, status, original, origin, note, scan_url, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id`,
+    `INSERT INTO contracts (entity_id, kind, counterparty, responsible, subject, amount_text, num, signed_on, ends_text, status, original, origin, note, scan_url, storage, location, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id`,
     [...values(b), userId],
   );
   return r.rows[0]!.id;
@@ -113,7 +115,7 @@ contractsRouter.put('/contracts/:id', async (req, res) => {
     await checkEntity(c, b.entityId);
     await c.query(
       `UPDATE contracts SET entity_id=$2, kind=$3, counterparty=$4, responsible=$5, subject=$6, amount_text=$7, num=$8, signed_on=$9, ends_text=$10,
-              status=$11, original=$12, origin=$13, note=$14, scan_url=$15 WHERE id = $1`,
+              status=$11, original=$12, origin=$13, note=$14, scan_url=$15, storage=$16, location=$17 WHERE id = $1`,
       [id, ...values(b)],
     );
     const d = (v: string | null) => (v ? fmtDate(v) : null);
@@ -126,6 +128,8 @@ contractsRouter.put('/contracts/:id', async (req, res) => {
       diffLine('завершення', x.ends_text, b.endsText),
       diffLine('статус', x.status, b.status),
       diffLine('оригінал', x.original, b.original),
+      diffLine('зберігання', x.storage, b.storage),
+      diffLine('де зберігається', x.location, b.location),
       diffLine('примітки', x.note, b.note),
     ].filter(Boolean);
     if (ch.length) await log(c, u.id, `Договір «${b.counterparty}»: ${ch.join('; ')}`);
@@ -204,9 +208,19 @@ const HEADERS: [RegExp, keyof Contract | 'scan'][] = [
   [/^діюч/, 'status'],
   [/^наявн/, 'original'],
   [/^поход/, 'origin'],
+  [/^де зберіга/, 'location'],
+  [/^зберіга/, 'storage'],
   [/^приміт/, 'note'],
   [/^відскан/, 'scan'],
 ];
+
+/** «фізично», «електронно», «фізично і електронно» / «обидва» з файлу → значення поля; інше — порожньо. */
+const storageOf = (v: string): (typeof CONTRACT_STORAGE)[number] => {
+  const x = v.toLowerCase();
+  const phys = x.includes('фізич') || x.includes('паперов') || x.includes('обидва');
+  const el = x.includes('електрон') || x.includes('обидва');
+  return phys && el ? 'Фізично і електронно' : phys ? 'Фізично' : el ? 'Електронно' : '';
+};
 
 export function parseContracts(ws: ExcelJS.Worksheet, entityId: number): Contract[] {
   const cell = (c: ExcelJS.Cell): string => {
@@ -250,6 +264,8 @@ export function parseContracts(ws: ExcelJS.Worksheet, entityId: number): Contrac
         status: status.startsWith('діюч') ? 'Діючий' : status.startsWith('заверш') ? 'Завершений' : '',
         original: g('original'),
         origin: g('origin'),
+        location: g('location'),
+        storage: storageOf(g('storage')),
         note: g('note'),
         scanUrl: scan?.hyperlink && /^https?:/.test(scan.hyperlink) ? scan.hyperlink : null,
       }),

@@ -6,7 +6,7 @@ import { Router, type Request, type Response } from 'express';
 import multer from 'multer';
 import { z } from 'zod';
 import type pg from 'pg';
-import { ACCOUNTS, ART_TYPES, CASH_ACCOUNTS, PNL_LINES, USD_ACCOUNT, findArticle, fmtDate, kyivToday, lineLabel, money, typeSign, usd as usdFmt } from '@vudo/shared';
+import { ACCOUNTS, ART_TYPES, CASH_ACCOUNTS, PNL_LINES, USD_ACCOUNT, findArticle, fmtDate, kyivToday, lineLabel, money, moneyKop, typeSign, usd as usdFmt } from '@vudo/shared';
 import { pool, tx } from '../db.js';
 import { badRequest, notFound } from '../errors.js';
 import { me, requireOwner } from '../auth/middleware.js';
@@ -460,6 +460,17 @@ financeRouter.get('/finance/pnl', async (req, res) => {
     if (p.line === FUTURE_CLOSED) futureClosed[p.month] = p.amount;
     else planBy[p.month]![p.line] = p.amount;
   }
+  // Суми факту, вписані вручну, замінюють пораховані (рядок «Витрати на замовлення» — як показано на екрані, без закритих майбутніх витрат).
+  // Грошовий потік і залишок лишаються з обліку.
+  const ov = await pool.query<{ month: string; line: string; amount: number }>('SELECT month, line, amount FROM pnl_override WHERE month LIKE $1', [`${year}-%`]);
+  const overrides: { month: string; line: string; amount: number; computed: number | null }[] = [];
+  for (const o of ov.rows) {
+    const f = fact[o.month]!;
+    const closed = o.line === 'orderCost' ? (futureClosed[o.month] ?? 0) : 0;
+    const computed = f[o.line] == null ? null : Math.round((f[o.line]! + closed) * 100) / 100;
+    overrides.push({ ...o, computed });
+    f[o.line] = Math.round((o.amount - closed) * 100) / 100;
+  }
   const years = await pool.query<{ y: number }>(
     `SELECT DISTINCT y FROM (
        SELECT extract(year FROM date)::int AS y FROM cash_ops UNION SELECT extract(year FROM date)::int FROM payments
@@ -472,6 +483,7 @@ financeRouter.get('/finance/pnl', async (req, res) => {
     plan: planBy,
     future,
     futureClosed,
+    overrides,
     fixed: fixed.rows,
     before: before0,
     notes: notes.rows,
@@ -505,6 +517,34 @@ financeRouter.put('/finance/pnl/plan', async (req, res) => {
     }
     const v = (x: number | null) => (x == null ? '—' : money(x));
     await writeLog(c, { userId: u.id, folder: 'fin', finScope: 'report', text: `${b.line === FUTURE_CLOSED ? `P&L ${b.month} · ${FUTURE_CLOSED_LABEL}` : `P&L план ${b.month} · ${lineLabel(b.line)}`}: ${v(old)} → ${v(b.amount)}` });
+  });
+  res.json({ ok: true });
+});
+
+/** Вписати суму факту вручну (amount — як на екрані, зі знаком) або повернути пораховану (null). */
+financeRouter.put('/finance/pnl/fact', async (req, res) => {
+  const b = z
+    .object({
+      month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
+      line: z.enum(PNL_LINES.map((l) => l[0] as string).filter((l) => l !== 'none') as [string, ...string[]]),
+      amount: z.number().min(-1_000_000_000).max(1_000_000_000).nullable(),
+    })
+    .parse(req.body);
+  const amount = b.amount == null ? null : Math.round(planSigned(b.line as PnlLine, b.amount) * 100) / 100;
+  const u = me(req);
+  await tx(async (c) => {
+    const r = await c.query<{ amount: number }>('SELECT amount FROM pnl_override WHERE month = $1 AND line = $2 FOR UPDATE', [b.month, b.line]);
+    const old = r.rows[0]?.amount ?? null;
+    if (old === amount) return;
+    if (amount == null) await c.query('DELETE FROM pnl_override WHERE month = $1 AND line = $2', [b.month, b.line]);
+    else
+      await c.query(
+        `INSERT INTO pnl_override (month, line, amount, updated_by) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (month, line) DO UPDATE SET amount = EXCLUDED.amount, updated_at = now(), updated_by = EXCLUDED.updated_by`,
+        [b.month, b.line, amount, u.id],
+      );
+    const v = (x: number | null) => (x == null ? 'пораховано' : moneyKop(x));
+    await writeLog(c, { userId: u.id, folder: 'fin', finScope: 'report', text: `P&L факт ${b.month} · ${lineLabel(b.line)}: ${v(old)} → ${v(amount)}` });
   });
   res.json({ ok: true });
 });

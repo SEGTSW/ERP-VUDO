@@ -439,9 +439,33 @@ async function contractsSheets(req: Request): Promise<Sheet[]> {
       { h: 'Діючий/завершений', k: 'status' },
       { h: 'Наявність оригіналу', k: 'original' },
       { h: 'Походження договору', k: 'origin' },
+      { h: 'Зберігання', k: 'storage' },
+      { h: 'Де зберігається', k: 'location' },
       { h: 'Примітки', k: 'note' },
       { h: 'Файли', k: 'fileNames' },
       { h: 'Скан', k: 'scanUrl' },
+    ],
+    rows: d.rows.filter((r) => r.entityId === e.id && !r.archived).map((r) => ({ ...r, fileNames: (r.files as Row[]).map((f) => f.name) })),
+  }));
+}
+
+async function primarySheets(req: Request): Promise<Sheet[]> {
+  const d = await internal<{ entities: { id: number; name: string }[]; rows: Row[] }>(req, '/primary-docs');
+  return d.entities.map((e) => ({
+    name: e.name.replace(/[\\/?*:[\]]/g, ' '),
+    cols: [
+      { h: 'Дата', k: 'docDate', t: 'date' },
+      { h: 'Вид', k: 'kind' },
+      { h: 'Вхідний / вихідний', k: 'direction' },
+      { h: 'Номер', k: 'num' },
+      { h: 'Контрагент', k: 'counterparty' },
+      { h: 'Зміст', k: 'subject' },
+      { h: 'Сума', k: 'amount', t: 'money' },
+      { h: 'Оплата', k: 'payStatus' },
+      { h: 'Зберігання', k: 'storage' },
+      { h: 'Де зберігається', k: 'location' },
+      { h: 'Примітки', k: 'note' },
+      { h: 'Файли', k: 'fileNames' },
     ],
     rows: d.rows.filter((r) => r.entityId === e.id && !r.archived).map((r) => ({ ...r, fileNames: (r.files as Row[]).map((f) => f.name) })),
   }));
@@ -619,6 +643,7 @@ const SECTIONS: Record<string, { file: string; build: (req: Request, u: User) =>
   finance: { file: 'Фінанси', build: financeSheets },
   registry: { file: 'Реєстр_платежів', build: registrySheets },
   contracts: { file: 'Договори', build: contractsSheets },
+  primary: { file: 'Первинні_документи', build: primarySheets },
   plan: { file: 'Планування', build: planSheets },
   myday: { file: 'Виїзди', build: mydaySheets },
   stock: { file: 'Склад', build: stockSheets },

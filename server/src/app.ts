@@ -26,6 +26,7 @@ import { timeRouter } from './routes/time.js';
 import { kbRouter } from './routes/kb.js';
 import { exportRouter } from './routes/export.js';
 import { contractsRouter } from './routes/contracts.js';
+import { primaryRouter } from './routes/primary.js';
 import { registersRouter } from './routes/registers.js';
 
 function clientDist(): string | null {
@@ -95,6 +96,7 @@ export function createApp() {
   api.use(exportRouter);
   api.use(registersRouter);
   api.use(contractsRouter);
+  api.use(primaryRouter);
   api.use(() => {
     throw new HttpError(404, 'Невідомий запит.');
   });

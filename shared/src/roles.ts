@@ -62,7 +62,7 @@ export function navFor(u: RoleHolder): NavItem[] {
       { key: 'myday', label: 'Виїзди' },
       { key: 'clients', label: 'Клієнти' },
       { key: 'finance', label: isOwner(u) ? 'Фінанси' : 'Борги' },
-      ...(isOwner(u) ? [{ key: 'contracts' as const, label: 'Договори' }] : []),
+      ...(isOwner(u) ? [{ key: 'contracts' as const, label: 'Документи' }] : []),
       { key: 'stats', label: 'Аналітика' },
       { key: 'time', label: 'Табель' },
       { key: 'kb', label: 'База знань' },

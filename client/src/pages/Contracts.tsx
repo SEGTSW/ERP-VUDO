@@ -1,9 +1,10 @@
 import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CONTRACT_KINDS, CONTRACT_STATUSES, FILE_EXTENSIONS, MAX_FILE_MB, fmtDate } from '@vudo/shared';
+import { CONTRACT_KINDS, CONTRACT_STATUSES, CONTRACT_STORAGE, FILE_EXTENSIONS, MAX_FILE_MB, fmtDate } from '@vudo/shared';
 import { api, errorText } from '../api';
 import { ConfirmButton, Modal, WarnBox } from '../ui/common';
-import { RowLink, XlButton } from '../ui/bits';
+import { RowLink, SubTabs, XlButton } from '../ui/bits';
+import { PrimaryDocs } from './PrimaryDocs';
 import { useToast } from '../ui/toast';
 
 interface Entity {
@@ -24,6 +25,8 @@ interface Contract {
   status: string;
   original: string;
   origin: string;
+  storage: string;
+  location: string;
   note: string;
   scanUrl: string | null;
   archived: boolean;
@@ -39,8 +42,32 @@ function useRefresh() {
   };
 }
 
-/** Реєстр договорів та інших документів за юрособами (лише власник). */
+type DocTab = 'contracts' | 'primary';
+const DOC_TABS: [DocTab, string][] = [
+  ['contracts', 'Договори'],
+  ['primary', 'Первинні документи'],
+];
+
+/** Розділ «Документи» (лише власник): договори за юрособами і реєстр первинних документів ТОВ / ФОП. */
 export function Contracts() {
+  const [tab, setTab] = useState<DocTab>(() => (sessionStorage.getItem('docs.tab') === 'primary' ? 'primary' : 'contracts'));
+  const go = (t: DocTab) => (sessionStorage.setItem('docs.tab', t), setTab(t));
+  return (
+    <>
+      <div className="bar">
+        <h1 className="grow">Документи</h1>
+        <XlButton section={tab} />
+      </div>
+      <div style={{ marginBottom: 14 }}>
+        <SubTabs tabs={DOC_TABS} cur={tab} onChange={go} />
+      </div>
+      {tab === 'contracts' ? <ContractsList /> : <PrimaryDocs />}
+    </>
+  );
+}
+
+/** Реєстр договорів та інших документів за юрособами. */
+function ContractsList() {
   const toast = useToast();
   const refresh = useRefresh();
   const q = useQuery({ queryKey: ['contracts'], queryFn: () => api.get<{ entities: Entity[]; rows: Contract[] }>('/contracts') });
@@ -62,7 +89,7 @@ export function Contracts() {
       r.archived === archived &&
       (!kind || r.kind === kind) &&
       (!status || r.status === (status === '-' ? '' : status)) &&
-      (!s || `${r.counterparty} ${r.subject} ${r.num} ${r.note} ${r.responsible}`.toLowerCase().includes(s)),
+      (!s || `${r.counterparty} ${r.subject} ${r.num} ${r.note} ${r.responsible} ${r.location}`.toLowerCase().includes(s)),
   );
   const current = typeof edit === 'number' ? all.find((r) => r.id === edit) : null;
   const upload = useMutation({
@@ -80,11 +107,7 @@ export function Contracts() {
   });
   return (
     <>
-      <div className="bar">
-        <h1 className="grow">Договори і документи</h1>
-        <XlButton section="contracts" />
-      </div>
-      <div className="subtabs" style={{ marginBottom: 14 }}>
+      <div className="seg" style={{ marginBottom: 12 }}>
         {ents.map((e) => (
           <button key={e.id} type="button" aria-current={e.id === ent?.id} onClick={() => setSel(e.id)}>
             {e.name} <small className="muted">{all.filter((r) => r.entityId === e.id && !r.archived).length}</small>
@@ -133,6 +156,7 @@ export function Contracts() {
               <th>Завершення</th>
               <th>Статус</th>
               <th>Оригінал</th>
+              <th>Де зберігається</th>
               <th>Файли</th>
             </tr>
           </thead>
@@ -153,6 +177,10 @@ export function Contracts() {
                 <td>{r.endsText}</td>
                 <td>{r.status ? <span className={`pill ${r.status === 'Діючий' ? 'g-work' : 'g-done'}`}>{r.status}</span> : '—'}</td>
                 <td>{r.original || '—'}</td>
+                <td>
+                  {r.storage || (r.location ? '' : '—')}
+                  {r.location && <small className="muted" style={{ display: 'block' }}>{r.location}</small>}
+                </td>
                 <td onClick={(e) => e.stopPropagation()}>
                   {r.files.map((f) => (
                     <a key={f.id} className="lnk" style={{ display: 'block' }} href={`/api/contracts/files/${f.id}`} target="_blank" rel="noreferrer">
@@ -239,6 +267,8 @@ function ContractModal({
     status: item?.status ?? '',
     original: item?.original ?? '',
     origin: item?.origin ?? '',
+    storage: item?.storage ?? '',
+    location: item?.location ?? '',
     note: item?.note ?? '',
     scanUrl: item?.scanUrl ?? '',
   });
@@ -299,7 +329,7 @@ function ContractModal({
     if (ok.length) item ? add.mutate(ok) : setPicked([...picked, ...ok]);
     if (input.current) input.current.value = '';
   }
-  const field = (k: 'counterparty' | 'responsible' | 'subject' | 'amountText' | 'num' | 'endsText' | 'original' | 'origin' | 'scanUrl', label: string, ph = '') => (
+  const field = (k: 'counterparty' | 'responsible' | 'subject' | 'amountText' | 'num' | 'endsText' | 'original' | 'origin' | 'location' | 'scanUrl', label: string, ph = '') => (
     <label className="f">
       {label}
       <input value={v[k]} placeholder={ph} onChange={(e) => setV({ ...v, [k]: e.target.value })} />
@@ -349,6 +379,17 @@ function ContractModal({
         </label>
         {field('original', 'Наявність оригіналу')}
         {field('origin', 'Походження договору')}
+        <label className="f">
+          Зберігання
+          <select value={v.storage} onChange={(e) => setV({ ...v, storage: e.target.value })}>
+            {CONTRACT_STORAGE.map((x) => (
+              <option key={x} value={x}>
+                {x || '—'}
+              </option>
+            ))}
+          </select>
+        </label>
+        {field('location', 'Де зберігається', v.storage === 'Електронно' ? 'Google Drive / папка «Договори 2026»' : 'Офіс, шафа 2, папка «Постачальники»')}
         {field('scanUrl', 'Посилання на скан', 'https://…')}
       </div>
       <label className="f">

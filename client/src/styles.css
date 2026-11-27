@@ -260,6 +260,8 @@ table.pnl td.neg{color:var(--s-bad-fg)}table.pnl td.cur{background:color-mix(in 
 table.pnl tr.secrow th{background:var(--bg);font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);padding:10px 8px 6px;position:sticky;left:0}
 .pin{width:112px;padding:3px 6px;font-size:12px;text-align:right;font-family:var(--f-num);background:transparent;border-color:transparent}
 .pin:hover,.pin:focus{border-color:var(--line);background:var(--surface)}
+.pin.fact{font-weight:600;color:var(--fg)}.pin.fact.neg{color:var(--s-bad-fg)}
+.pin.ovr{background:var(--accent-soft);border-color:color-mix(in srgb,var(--accent) 40%,transparent)}
 table.tarts{min-width:980px}table.tarts td{padding:4px 6px}table.tarts tbody tr{cursor:default}table.tarts tbody tr:hover td{background:none}
 table.tarts input:not([type=checkbox]),table.tarts select{width:100%;padding:5px 7px;font-size:13px}
 table.tarts th.tgrp{vertical-align:top;background:var(--sunk);font-size:13px;text-transform:none;letter-spacing:0;color:var(--fg);padding-top:10px}

@@ -13,6 +13,8 @@ interface PnlData {
   plan: Record<string, Record<string, number>>;
   future: Record<string, { paid: number; unpaid: number }>;
   futureClosed: Record<string, number>;
+  /** Суми факту, вписані вручну; computed — що було б без них */
+  overrides: { month: string; line: string; amount: number; computed: number | null }[];
   /** Місяці, де факт перенесено з файлу */
   fixed: { month: string; note: string }[];
   before: { plan: LineSums; fact: LineSums } | null;
@@ -27,12 +29,25 @@ const num = (v: number | null | undefined) => (v == null || v === 0 ? '' : kop(v
 const pct = (v: number | null) => (v == null ? '' : `${(Math.round(v * 10) / 10).toLocaleString('uk-UA')}%`);
 
 /** Клітинка плану: зберігається після виходу з поля; витрати — без мінуса. */
-function PlanCell({ value, onCommit, label }: { value: number | undefined; onCommit: (v: number | null) => void; label: string }) {
+function PlanCell({
+  value,
+  onCommit,
+  label,
+  className = '',
+  title,
+}: {
+  value: number | undefined;
+  onCommit: (v: number | null) => void;
+  label: string;
+  className?: string;
+  title?: string;
+}) {
   const [t, setT] = useState<string | null>(null);
   const shown = t ?? (value == null ? '' : kop(value));
   return (
     <input
-      className="pin"
+      className={`pin ${className}`}
+      title={title}
       inputMode="decimal"
       value={shown}
       placeholder="—"
@@ -61,6 +76,14 @@ export function PnlTab() {
   const save = useMutation({
     mutationFn: (v: { month: string; line: string; amount: number | null }) => api.put('/finance/pnl/plan', v),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['finance', 'pnl'] }),
+    onError: (e) => toast(errorText(e), true),
+  });
+  const fixFact = useMutation({
+    mutationFn: (v: { month: string; line: string; amount: number | null }) => api.put('/finance/pnl/fact', v),
+    onSuccess: (_r, v) => {
+      for (const k of ['finance', 'log']) void qc.invalidateQueries({ queryKey: [k] });
+      toast(v.amount == null ? 'Факт знову пораховано' : 'Суму факту змінено');
+    },
     onError: (e) => toast(errorText(e), true),
   });
   const unfix = useMutation({
@@ -94,6 +117,24 @@ export function PnlTab() {
   // Факт рядка на екрані: витрати на замовлення — без закритих майбутніх витрат
   const shown = (k: PnlLine, m: string) => (k === 'orderCost' ? orderCostShown(F(m).orderCost, d.futureClosed[m]) : F(m)[k]);
 
+  // Факт можна виправити вручну: порожнє поле повертає пораховану суму
+  const ovOf = (m: string, k: string) => d.overrides.find((x) => x.month === m && x.line === k);
+  const factCell = (k: PnlLine, m: string) => {
+    const o = ovOf(m, k);
+    const v = shown(k, m);
+    return (
+      <td key={m} className={cc(m)}>
+        <PlanCell
+          value={v == null || v === 0 ? (o ? 0 : undefined) : v}
+          label={`Факт ${lineLabel(k)} ${m}`}
+          className={`fact ${(v ?? 0) < 0 ? 'neg' : ''} ${o ? 'ovr' : ''}`}
+          title={o ? `Вписано вручну. Пораховано: ${o.computed == null ? '—' : kop(o.computed)}. Очистіть поле, щоб повернути.` : 'Факт з обліку. Можна вписати іншу суму.'}
+          onCommit={(x) => fixFact.mutate({ month: m, line: k, amount: x })}
+        />
+      </td>
+    );
+  };
+
   const B = d.before;
   const bc = (v: number | null | undefined, text?: string) => B && <td className={`r num ${(v ?? 0) < 0 ? 'neg' : ''}`}>{text ?? num(v)}</td>;
   const bNet = B ? Object.values(B.plan).reduce<number>((t, v) => t + (v ?? 0), 0) : 0;
@@ -118,11 +159,7 @@ export function PnlTab() {
       </tr>
       <tr className="fa">
         {bc(B?.fact[k])}
-        {ms.map((m) => (
-          <td key={m} className={`r num ${cc(m)} ${(shown(k, m) ?? 0) < 0 ? 'neg' : ''}`}>
-            {num(shown(k, m))}
-          </td>
-        ))}
+        {ms.map((m) => factCell(k, m))}
         <td className="r num">{num(tot((m) => shown(k, m)))}</td>
       </tr>
     </Fragment>
@@ -198,7 +235,7 @@ export function PnlTab() {
         </select>
         <span className="grow" />
         <ImportButton kind="pnl" />
-        <small className="muted">План вводиться в клітинки (витрати без мінуса), факт рахується з обліку.</small>
+        <small className="muted">План вводиться в клітинки (витрати без мінуса). Факт рахується з обліку, але суму можна виправити вручну — такі клітинки підсвічені.</small>
       </div>
       {!!d.fixed.length && (
         <div className="note" style={{ marginBottom: 12, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -246,11 +283,7 @@ export function PnlTab() {
                 Дохід<small>факт</small>
               </th>
               {bc(B?.fact.income)}
-              {ms.map((m) => (
-                <td key={m} className={`r num ${cc(m)} ${(F(m).income ?? 0) < 0 ? 'neg' : ''}`}>
-                  {num(F(m).income)}
-                </td>
-              ))}
+              {ms.map((m) => factCell('income', m))}
               <td className="r num">{num(tot((m) => F(m).income))}</td>
             </tr>
             {base('orderCost')}
@@ -309,6 +342,8 @@ export function PnlTab() {
       <div className="note" style={{ marginTop: 12 }}>
         Виручка = дохід + витрати на замовлення (витрати від'ємні). Результат = виручка + адміністративні, ФОП, інші, маркетинг, податки, логістика,
         співпраці, рекламація, кредити, оборотні кошти. Операції з рядком «не в P&L» (обмін коштів, зведення) рахуються лише в грошовому потоці й залишку.
+        Факт, вписаний вручну, замінює порахований у P&L (рядки, виручка, результат), але не змінює грошовий потік і залишок — вони завжди з обліку.
+        Щоб повернути пораховану суму, очистіть клітинку.
         «Майбутні витрати закриті» — частина витрат на замовлення з обліку: факт витрат показується без неї, виручка рахується з обома.
         Майбутні витрати: «ще не закрито» — залишки з «Рахунків до оплати» (за місяцем строку; без строку — поточний місяць) і несплачені щомісячні /
         щотижневі постійні витрати; реєстр платежів сюди не додається.

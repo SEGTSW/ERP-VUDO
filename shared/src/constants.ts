@@ -57,6 +57,12 @@ export const PAYMENT_METHODS = ['готівка', 'картка', 'рахуно�
 /** Реєстр договорів. */
 export const CONTRACT_KINDS = ['договір', 'інший документ'] as const;
 export const CONTRACT_STATUSES = ['', 'Діючий', 'Завершений'] as const;
+/** Як зберігається документ. */
+export const CONTRACT_STORAGE = ['', 'Фізично', 'Електронно', 'Фізично і електронно'] as const;
+/** Первинні документи (ТОВ, ФОП). */
+export const PRIMARY_KINDS = ['Рахунок', 'Видаткова накладна', 'Акт виконаних робіт', 'Податкова накладна', 'Інший документ'] as const;
+export const PRIMARY_DIRECTIONS = ['Вхідний', 'Вихідний'] as const;
+export const PRIMARY_PAY = ['', 'Оплачено', 'Частково', 'Не оплачено'] as const;
 
 export const PLAN_STAGES = ['Прорахунок', 'Замір', 'Конструктив', 'Збірка', 'Монтаж'] as const;
 export type PlanStage = (typeof PLAN_STAGES)[number];
