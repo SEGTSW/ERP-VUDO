@@ -19,7 +19,7 @@ import { fetchOrder } from '../orders/repo.js';
 import { execCard, officeCard } from '../orders/serialize.js';
 import { getSettings } from '../settings.js';
 
-const CATEGORY_LABEL = { design: 'Дизайн-проєкт', spec: 'Прорахунки / специфікації', constr: 'Конструктив', other: 'Інші файли' } as const;
+const CATEGORY_LABEL = { design: 'Дизайн-проєкт', spec: 'Прорахунки / специфікації', tz: 'ТЗ', constr: 'Конструктив', other: 'Інші файли' } as const;
 type Category = keyof typeof CATEGORY_LABEL;
 
 mkdirSync(config.uploadDir, { recursive: true });
@@ -87,7 +87,7 @@ filesRouter.post('/orders/:id/files', async (req, res) => {
   const files = (req.files as Express.Multer.File[] | undefined) ?? [];
   const cleanup = () => Promise.all(files.map((f) => unlink(f.path).catch(() => {})));
   try {
-    const category = z.enum(['design', 'spec', 'constr', 'other']).parse(req.body?.category) as Category;
+    const category = z.enum(['design', 'spec', 'tz', 'constr', 'other']).parse(req.body?.category) as Category;
     if (category === 'spec' && !isOffice(u)) throw forbidden('Файли «Прорахунки / специфікації» додають лише менеджер і власник.');
     if (!files.length) throw badRequest('Виберіть файл.');
     await tx(async (c) => {

@@ -339,6 +339,19 @@ describe('коментарі й файли', () => {
     expect(await logTexts()).toContain('Додано файл «фото заміру.jpg» (Інші файли)');
   });
 
+  it('файл у розділі «ТЗ» додає менеджер, а виконавець бачить і відкриває', async () => {
+    const { ids, m } = await team();
+    const o = await newOrder(m, ids.iryna);
+    const up = await m.agent.post(`/api/orders/${o.id}/files`).set('X-VUDO', '1').field('category', 'tz').attach('files', Buffer.from('%PDF'), 'ТЗ конструктору.pdf');
+    expect(up.status).toBe(201);
+    const f = up.body.files.find((x: { category: string }) => x.category === 'tz');
+    expect(f).toMatchObject({ name: 'ТЗ конструктору.pdf' });
+    const t = await loginAs('taras');
+    expect((await t.get(`/api/orders/${o.id}`)).body.files.map((x: { category: string }) => x.category)).toEqual(['tz']);
+    expect((await t.get(`/api/files/${f.id}`)).status).toBe(200);
+    expect(await logTexts()).toContain('Додано файл «ТЗ конструктору.pdf» (ТЗ)');
+  });
+
   it('непідтримуваний тип файлу відхиляється з назвою', async () => {
     const { ids, m } = await team();
     const o = await newOrder(m, ids.iryna);

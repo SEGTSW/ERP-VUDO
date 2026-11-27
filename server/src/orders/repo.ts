@@ -63,7 +63,7 @@ export interface PaymentRow {
 export interface FileRow {
   id: number;
   orderId: number;
-  category: 'design' | 'spec' | 'constr' | 'other';
+  category: 'design' | 'spec' | 'tz' | 'constr' | 'other';
   name: string;
   size: number;
   mime: string | null;
